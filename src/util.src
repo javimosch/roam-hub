@@ -72,12 +72,15 @@ func bearer_tenant(db, req) (tenant_id, ok) {
 }
 
 // worker_tenant — same, against the worker token (roam --worker auth).
+// Accepts Authorization: Bearer OR x-api-key, so an anthropic-shaped client
+// (roam's agent loop) can point its base URL at the hub with zero rewiring.
 func worker_tenant(db, req) (tenant_id, ok) {
     tenant_id = ""
     ok = 0
+    tok := header(req, "x-api-key")
     h := header(req, "Authorization")
-    if !has_prefix(h, "Bearer ") { return tenant_id, ok }
-    tok := substr(h, 7, len(h))
+    if tok == "" && !has_prefix(h, "Bearer ") { return tenant_id, ok }
+    if tok == "" { tok = substr(h, 7, len(h)) }
     rows := sqlite_query(db, "SELECT id, email, token_hash, worker_token_hash, peage_wallet, created FROM tenants WHERE worker_token_hash = ?", []string{tok_hash(tok)})
     ts := parse(rows, []TenantRow{})
     if len(ts) == 0 { return tenant_id, ok }

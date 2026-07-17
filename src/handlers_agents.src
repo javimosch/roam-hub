@@ -56,7 +56,8 @@ func h_agent_create(req) (res) {
     }
     if model == "" { model = default_model() }
     id := newid()
-    due := now() + every
+    // first run fires at the NEXT tick (register → watch it run), then every_secs
+    due := now()
     sqlite_exec(db, "INSERT INTO agents(id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)", []string{id, tid, name, prompt, model, str(every), str(budget), report_url, str(due), str(now())})
     sqlite_close(db)
     res = ok_env("\"id\":" + json(id) + ",\"next_due\":" + str(due))
