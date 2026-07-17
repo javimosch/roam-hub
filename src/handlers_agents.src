@@ -49,8 +49,17 @@ func h_agent_create(req) (res) {
     prompt = unq(prompt)
     model = unq(model)
     report_url = unq(report_url)
-    if name == "" || prompt == "" || every <= 0 || budget <= 0 {
-        res = err_env(80, "invalid_argument", "name, prompt, every_secs>0, budget_microeur>0 required", 0, no_suggestions())
+    tmode, _ := json_get(req.body, ".trigger_mode")
+    tmode = unq(tmode)
+    if tmode == "" { tmode = "ignore" }
+    if tmode != "ignore" && tmode != "inject" {
+        res = err_env(80, "invalid_argument", "trigger_mode must be 'ignore' or 'inject'", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    // every_secs 0 = webhook-only (no cron); >0 = interval schedule (webhook works too)
+    if name == "" || prompt == "" || every < 0 || budget <= 0 {
+        res = err_env(80, "invalid_argument", "name, prompt, every_secs>=0 (0 = webhook-only), budget_microeur>0 required", 0, no_suggestions())
         sqlite_close(db)
         return res
     }
@@ -58,9 +67,69 @@ func h_agent_create(req) (res) {
     id := newid()
     // first run fires at the NEXT tick (register → watch it run), then every_secs
     due := now()
-    sqlite_exec(db, "INSERT INTO agents(id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)", []string{id, tid, name, prompt, model, str(every), str(budget), report_url, str(due), str(now())})
+    if every == 0 { due = 0 }
+    secret := to_hex(rand_bytes(12))
+    sqlite_exec(db, "INSERT INTO agents(id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)", []string{id, tid, name, prompt, model, str(every), str(budget), report_url, str(due), str(now()), secret, tmode})
     sqlite_close(db)
-    res = ok_env("\"id\":" + json(id) + ",\"next_due\":" + str(due))
+    res = ok_env("\"id\":" + json(id) + ",\"next_due\":" + str(due) + ",\"trigger_url\":" + json(public_base() + "/t/" + id + "/" + secret) + ",\"trigger_mode\":" + json(tmode))
+}
+
+func public_base() (u) {
+    u = env("MAA_PUBLIC")
+    if u == "" { u = "https://agents.intrane.fr" }
+}
+
+// POST /t/<agent_id>/<secret> — the PUBLIC webhook trigger. No bearer auth: the
+// secret in the path is the credential (webhook sources rarely can set custom
+// headers). Flood control: at most ONE queued run per agent — extra hits
+// coalesce onto it (the journal records each coalesced hit). trigger_mode
+// 'inject' stores the request body (capped) on the run; h_work appends it to
+// the prompt so the agent sees the event that woke it.
+func h_trigger(req) (res) {
+    rest := param(pathof(req), "/t/")
+    parts := split(rest, "/")
+    if len(parts) != 2 {
+        res = err_env(80, "invalid_argument", "trigger path is /t/<agent_id>/<secret>", 0, no_suggestions())
+        return res
+    }
+    db := dbopen()
+    rows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode FROM agents WHERE id = ?", []string{parts[0]})
+    ags := parse(rows, []AgentRow{})
+    if len(ags) == 0 || ags[0].trigger_secret == "" || ags[0].trigger_secret != parts[1] {
+        res = err_env(92, "resource_not_found", "no such trigger", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    a := ags[0]
+    if a.status != "active" {
+        res = err_env(95, "agent_paused", "agent is not active", 1, "[\"POST /v1/agent/resume {id}\"]")
+        sqlite_close(db)
+        return res
+    }
+    qrows := sqlite_query(db, "SELECT COUNT(*) AS n FROM runs WHERE agent_id = ? AND status = 'queued'", []string{a.id})
+    qc := parse(qrows, []CntRow{})
+    if len(qc) > 0 && qc[0].n > 0 {
+        sqlite_close(db)
+        res = ok_env("\"queued\":false,\"coalesced\":true")
+        return res
+    }
+    payload := ""
+    if a.trigger_mode == "inject" {
+        payload = req.body
+        if len(payload) > 8192 { payload = substr(payload, 0, 8192) }
+    }
+    run_id := newid()
+    sqlite_exec(db, "INSERT INTO runs(id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload) VALUES(?, ?, ?, 'queued', ?, 0, 0, 0, 0, 0, '', '', ?)", []string{run_id, a.id, a.tenant_id, str(now()), payload})
+    if solvent(a.tenant_id) == 0 {
+        sqlite_exec(db, "UPDATE runs SET status = 'blocked', exit_reason = 'payment_required' WHERE id = ?", []string{run_id})
+        journal(db, run_id, "payment_required", "{\"hint\":\"top up your peage wallet\"}")
+        sqlite_close(db)
+        res = err_env(96, "payment_required", "tenant wallet cannot cover a run", 1, "[\"top up: https://peage.intrane.fr/llms.txt\"]")
+        return res
+    }
+    journal(db, run_id, "queued", "{\"trigger\":\"webhook\",\"mode\":" + json(a.trigger_mode) + "}")
+    sqlite_close(db)
+    res = ok_env("\"queued\":true,\"run_id\":" + json(run_id))
 }
 
 // GET /v1/agents — list this tenant's specs.
@@ -72,7 +141,7 @@ func h_agent_list(req) (res) {
         sqlite_close(db)
         return res
     }
-    rows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created FROM agents WHERE tenant_id = ? ORDER BY created DESC", []string{tid})
+    rows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode FROM agents WHERE tenant_id = ? ORDER BY created DESC", []string{tid})
     ags := parse(rows, []AgentRow{})
     out := "\"agents\":["
     i := 0

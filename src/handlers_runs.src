@@ -14,7 +14,7 @@ func h_work(req) (res) {
         sqlite_close(db)
         return res
     }
-    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision FROM runs WHERE tenant_id = ? AND status = 'queued' ORDER BY scheduled_at ASC LIMIT 1", []string{tid})
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload FROM runs WHERE tenant_id = ? AND status = 'queued' ORDER BY scheduled_at ASC LIMIT 1", []string{tid})
     rs := parse(rows, []RunRow{})
     if len(rs) == 0 {
         res = response("204 No Content", "application/json", "")
@@ -23,7 +23,7 @@ func h_work(req) (res) {
     }
     r := rs[0]
     sqlite_exec(db, "UPDATE runs SET status = 'running', started_at = ? WHERE id = ? AND status = 'queued'", []string{str(now()), r.id})
-    arows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created FROM agents WHERE id = ?", []string{r.agent_id})
+    arows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode FROM agents WHERE id = ?", []string{r.agent_id})
     ags := parse(arows, []AgentRow{})
     if len(ags) == 0 {
         res = err_env(92, "resource_not_found", "agent vanished under queued run", 0, no_suggestions())
@@ -33,7 +33,10 @@ func h_work(req) (res) {
     a := ags[0]
     journal(db, r.id, "claimed", "{}")
     sqlite_close(db)
-    res = ok_env("\"run_id\":" + json(r.id) + ",\"agent_id\":" + json(a.id) + ",\"name\":" + json(a.name) + ",\"prompt\":" + json(a.prompt) + ",\"model\":" + json(a.model) + ",\"budget_microeur\":" + str(a.budget_microeur))
+    // webhook-injected runs carry the event: the worker's goal = prompt + payload
+    goal := a.prompt
+    if r.payload != "" { goal = goal + "\n\n[webhook event that triggered this run]\n" + r.payload }
+    res = ok_env("\"run_id\":" + json(r.id) + ",\"agent_id\":" + json(a.id) + ",\"name\":" + jesc(a.name) + ",\"prompt\":" + jesc(goal) + ",\"model\":" + json(a.model) + ",\"budget_microeur\":" + str(a.budget_microeur))
 }
 
 // POST /v1/run/events {run_id, kind, data} — worker streams journal entries.
@@ -119,7 +122,7 @@ func h_runs(req) (res) {
         return res
     }
     agent_id := query(req, "agent")
-    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision FROM runs WHERE agent_id = ? AND tenant_id = ? ORDER BY scheduled_at DESC LIMIT 50", []string{agent_id, tid})
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload FROM runs WHERE agent_id = ? AND tenant_id = ? ORDER BY scheduled_at DESC LIMIT 50", []string{agent_id, tid})
     rs := parse(rows, []RunRow{})
     out := "\"runs\":["
     i := 0
@@ -209,7 +212,7 @@ func h_run_decision(req) (res) {
         sqlite_close(db)
         return res
     }
-    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision FROM runs WHERE id = ?", []string{id})
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload FROM runs WHERE id = ?", []string{id})
     rs := parse(rows, []RunRow{})
     d := rs[0].decision
     if rs[0].status == "killed" { d = "stop" }

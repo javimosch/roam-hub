@@ -34,6 +34,17 @@ func no_suggestions() (s) {
     s = "[]"
 }
 
+// jesc — a fully-escaped JSON string literal for values that can carry user
+// content (prompts, webhook payloads). json() alone does not escape newlines.
+func jesc(s) (o) {
+    o = replace(s, "\\", "\\\\")
+    o = replace(o, "\"", "\\\"")
+    o = replace(o, "\n", "\\n")
+    o = replace(o, "\r", " ")
+    o = replace(o, "\t", " ")
+    o = "\"" + o + "\""
+}
+
 // unq — strip the quotes json_get leaves on string values.
 func unq(s) (out) {
     out = s

@@ -52,7 +52,7 @@ func solvent(tenant_id) (ok) {
 // either way. No internal retries (bible rule) — a failed charge is a journal
 // event the owner acts on; idempotency key = run id makes re-billing safe.
 func charge_run(db, run_id) {
-    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision FROM runs WHERE id = ?", []string{run_id})
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload FROM runs WHERE id = ?", []string{run_id})
     rs := parse(rows, []RunRow{})
     if len(rs) == 0 { return }
     r := rs[0]

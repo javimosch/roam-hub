@@ -14,7 +14,12 @@ All responses: versioned JSON `{"v":"1", ...}`. Errors are typed:
 
 - `POST /v1/signup` {email} → {token} — one tenant per email
 - `GET  /v1/guide` — this document, in JSON, version-exact
-- `POST /v1/agents` {name, prompt, model, every_secs, budget_microeur, report_url} → {id}
+- `POST /v1/agents` {name, prompt, model, every_secs, budget_microeur, report_url,
+  trigger_mode?} → {id, trigger_url, trigger_mode}. every_secs=0 = webhook-only.
+  trigger_mode: "ignore" (default) fires the spec as-is; "inject" appends the
+  webhook's JSON body to the prompt (event-driven agents).
+- `POST /t/<agent_id>/<secret>` — the PUBLIC webhook trigger (secret in path,
+  no headers needed). Flood-safe: max 1 queued run per agent, extra hits coalesce.
 - `GET  /v1/agents` — list your specs
 - `GET  /v1/agent?id=` — one spec + last run summary
 - `POST /v1/agent/pause` {id} · `POST /v1/agent/resume` {id}
@@ -27,7 +32,9 @@ All responses: versioned JSON `{"v":"1", ...}`. Errors are typed:
 
 ## Billing
 
-peage per run: token cost × 1.3 + €0.01 flat. Insolvent → triggers don't fire
+peage per run: token cost × 1.3 + €0.01 flat. Token cost is the upstream's
+ACTUAL generation cost when the provider reports it (journal `cost_source:
+"actual"`), else a per-model rate table. Insolvent → triggers don't fire
 (journal records `payment_required`). Wallet: https://peage.intrane.fr/llms.txt
 
 ## Rules

@@ -82,8 +82,9 @@ func main() {
         budget := flagv(a, "--budget", "")
         model := flagv(a, "--model", "")
         rurl := flagv(a, "--report-url", "")
-        if name == "" || prompt == "" || every == "" || budget == "" { write(2, "usage: maa create --name <n> --prompt <p> --every <secs> --budget <microeur> [--model <m>] [--report-url <u>]\n")  exit(80) }
-        body := "{\"name\":" + jq(name) + ",\"prompt\":" + jq(prompt) + ",\"every_secs\":" + every + ",\"budget_microeur\":" + budget + ",\"model\":" + jq(model) + ",\"report_url\":" + jq(rurl) + "}"
+        tmode := flagv(a, "--trigger-mode", "")
+        if name == "" || prompt == "" || every == "" || budget == "" { write(2, "usage: maa create --name <n> --prompt <p> --every <secs> --budget <microeur> [--model <m>] [--report-url <u>] [--trigger-mode ignore|inject]\n       --every 0 = webhook-only (fire via the returned trigger_url)\n")  exit(80) }
+        body := "{\"name\":" + jq(name) + ",\"prompt\":" + jq(prompt) + ",\"every_secs\":" + every + ",\"budget_microeur\":" + budget + ",\"model\":" + jq(model) + ",\"report_url\":" + jq(rurl) + ",\"trigger_mode\":" + jq(tmode) + "}"
         exit(call("POST", "/v1/agents", body, need_token()))
     }
     if cmd == "list" { exit(call("GET", "/v1/agents", "", need_token())) }

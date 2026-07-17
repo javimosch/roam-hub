@@ -12,6 +12,7 @@ func handle(req) (res) {
     if req.method == "GET" && p == "/v1/guide" { return h_guide(req) }
     if req.method == "POST" && p == "/v1/signup" { return h_signup(req) }
     if req.method == "POST" && p == "/v1/wallet" { return h_wallet_set(req) }
+    if req.method == "POST" && has_prefix(p, "/t/") { return h_trigger(req) }
     if req.method == "POST" && p == "/v1/agents" { return h_agent_create(req) }
     if req.method == "GET" && p == "/v1/agents" { return h_agent_list(req) }
     if req.method == "POST" && p == "/v1/agent/pause" { return h_agent_setstatus(req, "paused") }

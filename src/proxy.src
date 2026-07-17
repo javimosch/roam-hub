@@ -35,7 +35,7 @@ func h_llm(req) (res) {
         sqlite_close(db)
         return res
     }
-    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision FROM runs WHERE id = ?", []string{run_id})
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload FROM runs WHERE id = ?", []string{run_id})
     rs := parse(rows, []RunRow{})
     r := rs[0]
     if r.status == "killed" {
@@ -50,13 +50,20 @@ func h_llm(req) (res) {
         sqlite_close(db)
         return res
     }
-    url, headers, cfg_err := upstream_config()
+    url, headers, provider, cfg_err := upstream_config()
     if cfg_err != "" {
         res = err_env(110, "misconfigured", cfg_err, 0, "[\"set MAA_ANTHROPIC_KEY or MAA_OPENROUTER_KEY on the hub\"]")
         sqlite_close(db)
         return res
     }
-    status, resp, herr := http_request("POST", url, headers, req.body)
+    fwd := req.body
+    // openrouter: ask for the ACTUAL generation cost in the response usage
+    // (billing source of truth — no rate table to maintain). Safe injection:
+    // request bodies never carry a "usage" key of their own.
+    if provider == "openrouter" && has_prefix(fwd, "{") {
+        fwd = "{\"usage\":{\"include\":true}," + substr(fwd, 1, len(fwd))
+    }
+    status, resp, herr := http_request("POST", url, headers, fwd)
     if herr != "" {
         journal(db, run_id, "llm_error", "{\"type\":\"upstream_unreachable\"}")
         res = err_env(105, "upstream_unreachable", "LLM upstream unreachable", 1, no_suggestions())
@@ -73,35 +80,91 @@ func h_llm(req) (res) {
     tout := usage_out(resp)
     model, _ := json_get(req.body, ".model")
     model = unq(model)
-    cost := llm_cost_microeur(model, tin, tout)
+    // billing source: upstream's ACTUAL cost when present (openrouter
+    // usage.cost, USD), else the rate table
+    src := "table"
+    cost := 0
+    actual, aok := usage_cost_microeur(resp)
+    if aok == 1 { cost = actual  src = "actual" } else { cost = llm_cost_microeur(model, tin, tout) }
     sqlite_exec(db, "UPDATE runs SET cost_microeur = cost_microeur + ?, tokens_in = tokens_in + ?, tokens_out = tokens_out + ? WHERE id = ?", []string{str(cost), str(tin), str(tout), run_id})
-    journal(db, run_id, "llm_call", "{\"model\":" + json(model) + ",\"tokens_in\":" + str(tin) + ",\"tokens_out\":" + str(tout) + ",\"cost_microeur\":" + str(cost) + "}")
+    journal(db, run_id, "llm_call", "{\"model\":" + json(model) + ",\"tokens_in\":" + str(tin) + ",\"tokens_out\":" + str(tout) + ",\"cost_microeur\":" + str(cost) + ",\"cost_source\":" + json(src) + "}")
     sqlite_close(db)
     res = response("200 OK", "application/json", resp)
 }
 
+// usage_cost_microeur — read the upstream's actual USD cost (openrouter
+// usage.cost) and convert to integer micro-EUR at the fixed rate below.
+// Pure integer parsing; handles plain decimals AND scientific notation
+// (2.34e-05) since JSON emitters use either for small amounts.
+func usage_cost_microeur(resp) (microeur, ok) {
+    microeur = 0
+    ok = 0
+    raw, err := json_get(resp, ".usage.cost")
+    if err != "" { return microeur, ok }
+    raw = unq(raw)
+    if raw == "" || raw == "null" || raw == "0" { return microeur, ok }
+    if has_prefix(raw, "-") { return microeur, ok }
+    mant := raw
+    exp := 0
+    lc := to_lower(raw)
+    if contains(lc, "e") {
+        eparts := split(lc, "e")
+        if len(eparts) != 2 { return microeur, ok }
+        mant = eparts[0]
+        es := eparts[1]
+        if has_prefix(es, "+") { es = substr(es, 1, len(es)) }
+        neg := 0
+        if has_prefix(es, "-") { neg = 1  es = substr(es, 1, len(es)) }
+        exp = parse_int(es)
+        if neg == 1 { exp = 0 - exp }
+    }
+    whole := mant
+    frac := ""
+    if contains(mant, ".") {
+        parts := split(mant, ".")
+        if len(parts) != 2 { return microeur, ok }
+        whole = parts[0]
+        frac = parts[1]
+    }
+    // value = digits × 10^(exp - len(frac));  µUSD = value × 10^6
+    digits := parse_int(whole + frac)
+    if digits <= 0 { return microeur, ok }
+    p := 6 + exp - len(frac)
+    micro_usd := digits
+    for p > 0 { micro_usd = micro_usd * 10  p = p - 1 }
+    for p < 0 { micro_usd = micro_usd / 10  p = p + 1 }
+    if micro_usd <= 0 { micro_usd = 1 }
+    microeur = micro_usd * usd_to_eur_pct() / 100
+    if microeur < 1 { microeur = 1 }
+    ok = 1
+}
+
+func usd_to_eur_pct() (p) {
+    p = jenv_int("MAA_USD_EUR_PCT", 93)
+}
+
 // upstream_config — resolve provider url + auth headers from env.
-func upstream_config() (url, headers, cfg_err) {
+func upstream_config() (url, headers, provider, cfg_err) {
     url = ""
     headers = []string{}
     cfg_err = ""
-    provider := env("MAA_LLM_PROVIDER")
+    provider = env("MAA_LLM_PROVIDER")
     if provider == "" { provider = "anthropic" }
     if provider == "anthropic" {
         key := env("MAA_ANTHROPIC_KEY")
-        if key == "" { cfg_err = "MAA_ANTHROPIC_KEY not set"  return url, headers, cfg_err }
+        if key == "" { cfg_err = "MAA_ANTHROPIC_KEY not set"  return url, headers, provider, cfg_err }
         url = env("MAA_LLM_URL")
         if url == "" { url = "https://api.anthropic.com/v1/messages" }
         headers = []string{"content-type: application/json", "x-api-key: " + key, "anthropic-version: 2023-06-01"}
-        return url, headers, cfg_err
+        return url, headers, provider, cfg_err
     }
     if provider == "openrouter" {
         key := env("MAA_OPENROUTER_KEY")
-        if key == "" { cfg_err = "MAA_OPENROUTER_KEY not set"  return url, headers, cfg_err }
+        if key == "" { cfg_err = "MAA_OPENROUTER_KEY not set"  return url, headers, provider, cfg_err }
         url = env("MAA_LLM_URL")
         if url == "" { url = "https://openrouter.ai/api/v1/chat/completions" }
         headers = []string{"content-type: application/json", "authorization: Bearer " + key}
-        return url, headers, cfg_err
+        return url, headers, provider, cfg_err
     }
     cfg_err = "unknown MAA_LLM_PROVIDER: " + provider
 }
@@ -148,7 +211,7 @@ func jenv_int(name, dflt) (n) {
 func budget_exhausted(db, r) (over, budget) {
     over = 0
     budget = 0
-    rows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created FROM agents WHERE id = ?", []string{r.agent_id})
+    rows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode FROM agents WHERE id = ?", []string{r.agent_id})
     ags := parse(rows, []AgentRow{})
     if len(ags) == 0 { return over, budget }
     budget = ags[0].budget_microeur
