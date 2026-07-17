@@ -19,6 +19,10 @@ func handle(req) (res) {
     if req.method == "GET" && p == "/v1/runs" { return h_runs(req) }
     if req.method == "GET" && p == "/v1/run" { return h_run_detail(req) }
     if req.method == "POST" && p == "/v1/run/kill" { return h_run_kill(req) }
+    if req.method == "POST" && p == "/v1/run/approve" { return h_run_decide(req, "approve") }
+    if req.method == "POST" && p == "/v1/run/deny" { return h_run_decide(req, "deny") }
+    if req.method == "POST" && p == "/v1/run/needs-human" { return h_needs_human(req) }
+    if req.method == "GET" && p == "/v1/run/decision" { return h_run_decision(req) }
     if req.method == "GET" && p == "/v1/work" { return h_work(req) }
     if req.method == "POST" && p == "/v1/llm" { return h_llm(req) }
     if req.method == "POST" && p == "/v1/messages" { return h_llm(req) }

@@ -35,7 +35,7 @@ func h_llm(req) (res) {
         sqlite_close(db)
         return res
     }
-    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason FROM runs WHERE id = ?", []string{run_id})
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision FROM runs WHERE id = ?", []string{run_id})
     rs := parse(rows, []RunRow{})
     r := rs[0]
     if r.status == "killed" {

@@ -14,7 +14,7 @@ func h_work(req) (res) {
         sqlite_close(db)
         return res
     }
-    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason FROM runs WHERE tenant_id = ? AND status = 'queued' ORDER BY scheduled_at ASC LIMIT 1", []string{tid})
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision FROM runs WHERE tenant_id = ? AND status = 'queued' ORDER BY scheduled_at ASC LIMIT 1", []string{tid})
     rs := parse(rows, []RunRow{})
     if len(rs) == 0 {
         res = response("204 No Content", "application/json", "")
@@ -103,7 +103,7 @@ func h_run_kill(req) (res) {
         sqlite_close(db)
         return res
     }
-    sqlite_exec(db, "UPDATE runs SET status = 'killed' WHERE id = ? AND (status = 'queued' OR status = 'running')", []string{id})
+    sqlite_exec(db, "UPDATE runs SET status = 'killed' WHERE id = ? AND (status = 'queued' OR status = 'running' OR status = 'awaiting')", []string{id})
     journal(db, id, "killed", "{}")
     sqlite_close(db)
     res = ok_env("\"run_id\":" + json(id) + ",\"status\":\"killed\"")
@@ -119,7 +119,7 @@ func h_runs(req) (res) {
         return res
     }
     agent_id := query(req, "agent")
-    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason FROM runs WHERE agent_id = ? AND tenant_id = ? ORDER BY scheduled_at DESC LIMIT 50", []string{agent_id, tid})
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision FROM runs WHERE agent_id = ? AND tenant_id = ? ORDER BY scheduled_at DESC LIMIT 50", []string{agent_id, tid})
     rs := parse(rows, []RunRow{})
     out := "\"runs\":["
     i := 0
@@ -162,6 +162,81 @@ func h_run_detail(req) (res) {
     out = out + "]"
     sqlite_close(db)
     res = ok_env(out)
+}
+
+// ---- M1: the hosted approval loop -----------------------------------------
+// A worker that parks on a destructive command has NOBODY watching a terminal.
+// The park travels to the hub (needs_human), the owner decides out-of-band
+// (maa approve/deny), and the worker picks the decision up on its poll loop.
+
+// POST /v1/run/needs-human {run_id, command} — worker parks a destructive
+// command. Resets any stale decision so a prior approve can't leak onto a new
+// park. Status 'awaiting' makes the park visible in run listings.
+func h_needs_human(req) (res) {
+    db := dbopen()
+    tid, ok := worker_tenant(db, req)
+    if ok == 0 {
+        res = err_env(81, "unauthorized", "worker token invalid", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    run_id, _ := json_get(req.body, ".run_id")
+    cmdv, _ := json_get(req.body, ".command")
+    run_id = unq(run_id)
+    if run_owned(db, run_id, tid) == 0 {
+        res = err_env(92, "resource_not_found", "no such run", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    sqlite_exec(db, "UPDATE runs SET status = 'awaiting', decision = '' WHERE id = ? AND status = 'running'", []string{run_id})
+    journal(db, run_id, "needs_human", "{\"command\":" + cmdv + ",\"hint\":\"maa approve <run_id> | maa deny <run_id>\"}")
+    sqlite_close(db)
+    res = ok_env("\"parked\":true")
+}
+
+// GET /v1/run/decision?run= — worker poll. A killed run reads as 'stop'.
+func h_run_decision(req) (res) {
+    db := dbopen()
+    tid, ok := worker_tenant(db, req)
+    if ok == 0 {
+        res = err_env(81, "unauthorized", "worker token invalid", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    id := query(req, "run")
+    if run_owned(db, id, tid) == 0 {
+        res = err_env(92, "resource_not_found", "no such run", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision FROM runs WHERE id = ?", []string{id})
+    rs := parse(rows, []RunRow{})
+    d := rs[0].decision
+    if rs[0].status == "killed" { d = "stop" }
+    sqlite_close(db)
+    res = ok_env("\"decision\":" + json(d))
+}
+
+// POST /v1/run/approve {id} · POST /v1/run/deny {id} — owner-side verdicts.
+func h_run_decide(req, verdict) (res) {
+    db := dbopen()
+    tid, ok := bearer_tenant(db, req)
+    if ok == 0 {
+        res = err_env(81, "unauthorized", "bearer token invalid", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    id, _ := json_get(req.body, ".id")
+    id = unq(id)
+    if run_owned(db, id, tid) == 0 {
+        res = err_env(92, "resource_not_found", "no such run", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    sqlite_exec(db, "UPDATE runs SET decision = ?, status = 'running' WHERE id = ? AND status = 'awaiting'", []string{verdict, id})
+    journal(db, id, verdict + "d_by_owner", "{}")
+    sqlite_close(db)
+    res = ok_env("\"run_id\":" + json(id) + ",\"decision\":" + json(verdict))
 }
 
 func run_owned(db, run_id, tenant_id) (ok) {

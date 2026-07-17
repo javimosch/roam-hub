@@ -103,6 +103,14 @@ func main() {
         if len(a) < 3 { write(2, "usage: maa journal <run_id>\n")  exit(80) }
         exit(call("GET", "/v1/run?id=" + a[2], "", need_token()))
     }
+    if cmd == "approve" {
+        if len(a) < 3 { write(2, "usage: maa approve <run_id>\n")  exit(80) }
+        exit(call("POST", "/v1/run/approve", "{\"id\":" + jq(a[2]) + "}", need_token()))
+    }
+    if cmd == "deny" {
+        if len(a) < 3 { write(2, "usage: maa deny <run_id>\n")  exit(80) }
+        exit(call("POST", "/v1/run/deny", "{\"id\":" + jq(a[2]) + "}", need_token()))
+    }
     if cmd == "kill" {
         if len(a) < 3 { write(2, "usage: maa kill <run_id>\n")  exit(80) }
         exit(call("POST", "/v1/run/kill", "{\"id\":" + jq(a[2]) + "}", need_token()))
