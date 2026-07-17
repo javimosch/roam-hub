@@ -1,0 +1,44 @@
+// trigger.src — the tick that makes agents autonomous: every TICK_SECS, queue a
+// run for each active agent whose next_due has passed AND whose tenant is
+// solvent (peage check — insolvency is a journal event, never a silent skip).
+// M0 trigger model: every_secs intervals only. Full cron syntax and webhook-in
+// triggers are M2+ (see VISION.md).
+
+func tick_secs() (s) {
+    s = 30
+}
+
+// tick_once — one pass; called in a loop by the trigger goroutine, and directly
+// by tests (no sleeping inside — the loop owns the cadence).
+func tick_once() (queued) {
+    queued = 0
+    db := dbopen()
+    t := now()
+    rows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created FROM agents WHERE status = 'active' AND next_due <= ?", []string{str(t)})
+    ags := parse(rows, []AgentRow{})
+    i := 0
+    for i < len(ags) {
+        a := ags[i]
+        run_id := newid()
+        sqlite_exec(db, "INSERT INTO runs(id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason) VALUES(?, ?, ?, 'queued', ?, 0, 0, 0, 0, 0, '')", []string{run_id, a.id, a.tenant_id, str(t)})
+        if solvent(a.tenant_id) == 0 {
+            sqlite_exec(db, "UPDATE runs SET status = 'blocked', exit_reason = 'payment_required' WHERE id = ?", []string{run_id})
+            journal(db, run_id, "payment_required", "{\"hint\":\"top up your peage wallet\"}")
+        } else {
+            journal(db, run_id, "queued", "{}")
+            queued = queued + 1
+        }
+        due := t + a.every_secs
+        sqlite_exec(db, "UPDATE agents SET next_due = ? WHERE id = ?", []string{str(due), a.id})
+        i = i + 1
+    }
+    sqlite_close(db)
+}
+
+// trigger_loop — the goroutine: tick forever. Spawned from app_main via go.
+func trigger_loop() {
+    for true {
+        tick_once()
+        sleep(tick_secs() * 1000)
+    }
+}

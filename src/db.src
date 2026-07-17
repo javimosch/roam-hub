@@ -1,0 +1,27 @@
+// db.src — SQLite layer: connection + schema. MAA_DB points tests at a temp
+// file; production points at the real path. Money is integer micro-EUR
+// (1_000_000 = 1 EUR) everywhere — no floats near billing.
+
+func dbpath() (p) {
+    p = env("MAA_DB")
+    if p == "" { p = "machin-agents.db" }
+}
+
+func dbopen() (db) {
+    db = sqlite_open(dbpath())
+}
+
+func ensure_schema(db) {
+    sqlite_exec(db, "CREATE TABLE IF NOT EXISTS tenants(id TEXT PRIMARY KEY, email TEXT UNIQUE, token_hash TEXT, worker_token_hash TEXT, created INTEGER)", []string{})
+    sqlite_exec(db, "CREATE TABLE IF NOT EXISTS agents(id TEXT PRIMARY KEY, tenant_id TEXT, name TEXT, prompt TEXT, model TEXT, every_secs INTEGER, budget_microeur INTEGER, report_url TEXT, status TEXT, next_due INTEGER, created INTEGER)", []string{})
+    sqlite_exec(db, "CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, agent_id TEXT, tenant_id TEXT, status TEXT, scheduled_at INTEGER, started_at INTEGER, finished_at INTEGER, cost_microeur INTEGER, tokens_in INTEGER, tokens_out INTEGER, exit_reason TEXT)", []string{})
+    sqlite_exec(db, "CREATE TABLE IF NOT EXISTS events(run_id TEXT, ts INTEGER, kind TEXT, data TEXT)", []string{})
+    sqlite_exec(db, "CREATE INDEX IF NOT EXISTS idx_runs_agent ON runs(agent_id)", []string{})
+    sqlite_exec(db, "CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id)", []string{})
+}
+
+// journal — append one event to a run's append-only log. The journal is the
+// product's observability spine: every state change lands here first.
+func journal(db, run_id, kind, data) {
+    sqlite_exec(db, "INSERT INTO events(run_id, ts, kind, data) VALUES(?, ?, ?, ?)", []string{run_id, str(now()), kind, data})
+}

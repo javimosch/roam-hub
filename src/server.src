@@ -1,0 +1,66 @@
+// machin-agents — the hosted autonomous-agent runtime, agent-first.
+// This file is the routing + lifecycle shell only; brains live in siblings:
+//   types.src db.src util.src handlers_agents.src handlers_runs.src
+//   trigger.src proxy.src billing.src report.src
+// machin encode merges them into one namespace; entry.src provides main()
+// (this file defines app_main so test compositions can bring their own main).
+
+func handle(req) (res) {
+    p := pathof(req)
+    if p == "/_health" { return ok_env("\"ok\":true,\"service\":\"machin-agents\"") }
+    if req.method == "GET" && p == "/llms.txt" { return h_llmstxt(req) }
+    if req.method == "GET" && p == "/v1/guide" { return h_guide(req) }
+    if req.method == "POST" && p == "/v1/signup" { return h_signup(req) }
+    if req.method == "POST" && p == "/v1/agents" { return h_agent_create(req) }
+    if req.method == "GET" && p == "/v1/agents" { return h_agent_list(req) }
+    if req.method == "POST" && p == "/v1/agent/pause" { return h_agent_setstatus(req, "paused") }
+    if req.method == "POST" && p == "/v1/agent/resume" { return h_agent_setstatus(req, "active") }
+    if req.method == "GET" && p == "/v1/runs" { return h_runs(req) }
+    if req.method == "GET" && p == "/v1/run" { return h_run_detail(req) }
+    if req.method == "POST" && p == "/v1/run/kill" { return h_run_kill(req) }
+    if req.method == "GET" && p == "/v1/work" { return h_work(req) }
+    if req.method == "POST" && p == "/v1/llm" { return h_llm(req) }
+    if req.method == "POST" && p == "/v1/run/events" { return h_run_events(req) }
+    if req.method == "POST" && p == "/v1/run/done" { return h_run_done(req) }
+    return err_env(92, "resource_not_found", "no such endpoint", 0, "[\"GET /v1/guide for the endpoint list\"]")
+}
+
+func h_llmstxt(req) (res) {
+    res = response("200 OK", "text/plain; charset=utf-8", llms_txt())
+}
+
+// h_guide — in-band capability doc: version-exact, machine-readable. The API
+// analog of `machin guide` and of --help-json in the bible.
+func h_guide(req) (res) {
+    res = ok_env("\"service\":\"machin-agents\",\"endpoints\":[\"POST /v1/signup\",\"POST /v1/agents\",\"GET /v1/agents\",\"POST /v1/agent/pause\",\"POST /v1/agent/resume\",\"GET /v1/runs?agent=\",\"GET /v1/run?id=\",\"POST /v1/run/kill\",\"GET /v1/work\",\"POST /v1/llm\",\"POST /v1/run/events\",\"POST /v1/run/done\"],\"billing\":\"peage per run: token cost x1.3 + 10000 microeur\",\"docs\":\"https://agents.intrane.fr/llms.txt\"")
+}
+
+func llms_txt() (t) {
+    t = "# machin-agents\nPOST a spec, walk away, get a webhook.\nSee GET /v1/guide for the machine-readable capability doc.\n"
+}
+
+func app_main() {
+    a := args()
+    cmd := ""
+    if len(a) >= 2 { cmd = a[1] }
+    if cmd == "migrate" {
+        db := dbopen()
+        ensure_schema(db)
+        sqlite_close(db)
+        write(1, "{\"v\":\"1\",\"migrated\":true}\n")
+        return
+    }
+    if cmd == "serve" {
+        port := 8810
+        if len(a) >= 3 { port = parse_int(a[2]) }
+        db := dbopen()
+        ensure_schema(db)
+        sqlite_close(db)
+        go trigger_loop()
+        write(2, "machin-agents serving :" + str(port) + "\n")
+        serve(port, func(req) { return handle(req) })
+        return
+    }
+    write(2, "usage: machin-agents serve [port] | migrate\n")
+    exit(80)
+}

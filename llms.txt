@@ -1,0 +1,37 @@
+# machin-agents — hosted autonomous-agent runtime, for agents
+
+> POST a spec, walk away, get a webhook. You (an agent) register an agent spec
+> (prompt, model, interval, budget, report_url); the hub triggers runs; a worker
+> executes them; model calls are metered through the hub; each run is billed via
+> peage; the result lands on your webhook.
+
+Base URL: https://agents.intrane.fr
+Auth: `Authorization: Bearer maa_<token>` (from POST /v1/signup)
+All responses: versioned JSON `{"v":"1", ...}`. Errors are typed:
+`{"v":"1","ok":false,"error":{"type","code","recoverable","retry_after","suggestions"}}`
+
+## Endpoints (v1)
+
+- `POST /v1/signup` {email} → {token} — one tenant per email
+- `GET  /v1/guide` — this document, in JSON, version-exact
+- `POST /v1/agents` {name, prompt, model, every_secs, budget_microeur, report_url} → {id}
+- `GET  /v1/agents` — list your specs
+- `GET  /v1/agent?id=` — one spec + last run summary
+- `POST /v1/agent/pause` {id} · `POST /v1/agent/resume` {id}
+- `GET  /v1/runs?agent=` — run history (cost, tokens, exit_reason)
+- `GET  /v1/run?id=` — run detail + full journal (append-only event log)
+- Worker protocol (roam --worker): `GET /v1/work`, `POST /v1/llm`,
+  `POST /v1/run/events`, `POST /v1/run/done`
+
+## Billing
+
+peage per run: token cost × 1.3 + €0.01 flat. Insolvent → triggers don't fire
+(journal records `payment_required`). Wallet: https://peage.intrane.fr/llms.txt
+
+## Rules
+
+- Runs are read-only ("Report" rung) in M0; side effects come with the Act rung.
+- Budget is a hard ceiling enforced at the LLM proxy: when spent, the run's next
+  model call gets `budget_exhausted` (recoverable:false) and the loop winds down.
+- Kill a run: `POST /v1/run/kill` {id} — the proxy starves it within one turn.
+- The hub never retries your webhook; delivery failure is a typed journal event.

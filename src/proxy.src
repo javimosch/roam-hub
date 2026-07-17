@@ -1,0 +1,53 @@
+// proxy.src — the metered LLM proxy: the product's spine. Workers hold NO model
+// keys; every model call is POST /v1/llm {run_id, body} and the hub forwards to
+// the upstream (Anthropic or OpenRouter, MAA_LLM_* env) with its own key, counts
+// exact tokens from the response, accumulates run cost, and refuses once the
+// run's budget is spent or the run was killed. Central metering = exact billing
+// + hard budget cut-off + a kill switch that starves the loop within one turn.
+
+// POST /v1/llm {run_id, body} — body is the upstream messages payload, passed
+// through opaque. TODO(M0-slice-4): forward via http_request, extract
+// usage.input_tokens/output_tokens, price via model rates, accumulate on the run.
+func h_llm(req) (res) {
+    db := dbopen()
+    tid, ok := worker_tenant(db, req)
+    if ok == 0 {
+        res = err_env(81, "unauthorized", "worker token invalid", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    run_id, _ := json_get(req.body, ".run_id")
+    run_id = unq(run_id)
+    if run_owned(db, run_id, tid) == 0 {
+        res = err_env(92, "resource_not_found", "no such run", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason FROM runs WHERE id = ?", []string{run_id})
+    rs := parse(rows, []RunRow{})
+    r := rs[0]
+    if r.status == "killed" {
+        res = err_env(93, "run_killed", "run was killed; wind down", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    over, budget := budget_exhausted(db, r)
+    if over == 1 {
+        journal(db, run_id, "budget_exhausted", "{\"budget_microeur\":" + str(budget) + ",\"spent_microeur\":" + str(r.cost_microeur) + "}")
+        res = err_env(94, "budget_exhausted", "run budget spent; wind down", 0, "[\"raise budget_microeur on the agent spec for future runs\"]")
+        sqlite_close(db)
+        return res
+    }
+    sqlite_close(db)
+    res = err_env(110, "not_implemented", "LLM forwarding lands in M0 slice 4", 0, "[\"see docs/M0.md\"]")
+}
+
+func budget_exhausted(db, r) (over, budget) {
+    over = 0
+    budget = 0
+    rows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created FROM agents WHERE id = ?", []string{r.agent_id})
+    ags := parse(rows, []AgentRow{})
+    if len(ags) == 0 { return over, budget }
+    budget = ags[0].budget_microeur
+    if r.cost_microeur >= budget { over = 1 }
+}

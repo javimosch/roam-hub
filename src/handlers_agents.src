@@ -1,0 +1,113 @@
+// handlers_agents.src — tenant signup + agent-spec CRUD. An "agent" here is a
+// SPEC (prompt, model, interval, budget, report_url), not a process; runs are
+// the executions. M0 trigger model is every_secs intervals (see VISION.md).
+
+// POST /v1/signup {email} → {token, worker_token}. One tenant per email.
+// Tokens are returned once and stored hashed — same rule as grepapi.
+func h_signup(req) (res) {
+    db := dbopen()
+    email, _ := json_get(req.body, ".email")
+    email = unq(email)
+    if email == "" {
+        res = err_env(80, "invalid_argument", "email is required", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    rows := sqlite_query(db, "SELECT COUNT(*) AS n FROM tenants WHERE email = ?", []string{email})
+    cnt := parse(rows, []CntRow{})
+    if len(cnt) > 0 && cnt[0].n > 0 {
+        res = err_env(90, "already_exists", "tenant exists for this email", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    id := newid()
+    tok := "maa_" + newid()
+    wtok := "maw_" + newid()
+    sqlite_exec(db, "INSERT INTO tenants(id, email, token_hash, worker_token_hash, created) VALUES(?, ?, ?, ?, ?)", []string{id, email, tok_hash(tok), tok_hash(wtok), str(now())})
+    sqlite_close(db)
+    res = ok_env("\"token\":" + json(tok) + ",\"worker_token\":" + json(wtok))
+}
+
+// POST /v1/agents {name, prompt, model, every_secs, budget_microeur, report_url} → {id}
+func h_agent_create(req) (res) {
+    db := dbopen()
+    tid, ok := bearer_tenant(db, req)
+    if ok == 0 {
+        res = err_env(81, "unauthorized", "bearer token invalid", 0, "[\"POST /v1/signup to obtain a token\"]")
+        sqlite_close(db)
+        return res
+    }
+    name, _ := json_get(req.body, ".name")
+    prompt, _ := json_get(req.body, ".prompt")
+    model, _ := json_get(req.body, ".model")
+    report_url, _ := json_get(req.body, ".report_url")
+    every := jint(req.body, ".every_secs")
+    budget := jint(req.body, ".budget_microeur")
+    name = unq(name)
+    prompt = unq(prompt)
+    model = unq(model)
+    report_url = unq(report_url)
+    if name == "" || prompt == "" || every <= 0 || budget <= 0 {
+        res = err_env(80, "invalid_argument", "name, prompt, every_secs>0, budget_microeur>0 required", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    if model == "" { model = default_model() }
+    id := newid()
+    due := now() + every
+    sqlite_exec(db, "INSERT INTO agents(id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)", []string{id, tid, name, prompt, model, str(every), str(budget), report_url, str(due), str(now())})
+    sqlite_close(db)
+    res = ok_env("\"id\":" + json(id) + ",\"next_due\":" + str(due))
+}
+
+// GET /v1/agents — list this tenant's specs.
+func h_agent_list(req) (res) {
+    db := dbopen()
+    tid, ok := bearer_tenant(db, req)
+    if ok == 0 {
+        res = err_env(81, "unauthorized", "bearer token invalid", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    rows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created FROM agents WHERE tenant_id = ? ORDER BY created DESC", []string{tid})
+    ags := parse(rows, []AgentRow{})
+    out := "\"agents\":["
+    i := 0
+    for i < len(ags) {
+        if i > 0 { out = out + "," }
+        a := ags[i]
+        out = out + "{\"id\":" + json(a.id) + ",\"name\":" + json(a.name) + ",\"model\":" + json(a.model) + ",\"every_secs\":" + str(a.every_secs) + ",\"budget_microeur\":" + str(a.budget_microeur) + ",\"status\":" + json(a.status) + ",\"next_due\":" + str(a.next_due) + "}"
+        i = i + 1
+    }
+    out = out + "]"
+    sqlite_close(db)
+    res = ok_env(out)
+}
+
+// POST /v1/agent/pause {id} · POST /v1/agent/resume {id}
+func h_agent_setstatus(req, status) (res) {
+    db := dbopen()
+    tid, ok := bearer_tenant(db, req)
+    if ok == 0 {
+        res = err_env(81, "unauthorized", "bearer token invalid", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    id, _ := json_get(req.body, ".id")
+    id = unq(id)
+    rows := sqlite_query(db, "SELECT COUNT(*) AS n FROM agents WHERE id = ? AND tenant_id = ?", []string{id, tid})
+    cnt := parse(rows, []CntRow{})
+    if len(cnt) == 0 || cnt[0].n == 0 {
+        res = err_env(92, "resource_not_found", "no such agent", 0, "[\"GET /v1/agents to list ids\"]")
+        sqlite_close(db)
+        return res
+    }
+    sqlite_exec(db, "UPDATE agents SET status = ? WHERE id = ? AND tenant_id = ?", []string{status, id, tid})
+    sqlite_close(db)
+    res = ok_env("\"id\":" + json(id) + ",\"status\":" + json(status))
+}
+
+func default_model() (m) {
+    m = env("MAA_DEFAULT_MODEL")
+    if m == "" { m = "claude-haiku-4-5" }
+}

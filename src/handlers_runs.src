@@ -1,0 +1,172 @@
+// handlers_runs.src — the worker protocol (roam --worker talks to these) plus
+// run history/journal reads for the owning tenant.
+//
+// Pull model: workers poll GET /v1/work; the hub never reaches into a worker box.
+
+// GET /v1/work — hand the oldest queued run to a worker of the same tenant.
+// 204 when idle. Claiming flips status queued → running (single UPDATE guards
+// against two workers claiming the same run).
+func h_work(req) (res) {
+    db := dbopen()
+    tid, ok := worker_tenant(db, req)
+    if ok == 0 {
+        res = err_env(81, "unauthorized", "worker token invalid", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason FROM runs WHERE tenant_id = ? AND status = 'queued' ORDER BY scheduled_at ASC LIMIT 1", []string{tid})
+    rs := parse(rows, []RunRow{})
+    if len(rs) == 0 {
+        res = response("204 No Content", "application/json", "")
+        sqlite_close(db)
+        return res
+    }
+    r := rs[0]
+    sqlite_exec(db, "UPDATE runs SET status = 'running', started_at = ? WHERE id = ? AND status = 'queued'", []string{str(now()), r.id})
+    arows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created FROM agents WHERE id = ?", []string{r.agent_id})
+    ags := parse(arows, []AgentRow{})
+    if len(ags) == 0 {
+        res = err_env(92, "resource_not_found", "agent vanished under queued run", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    a := ags[0]
+    journal(db, r.id, "claimed", "{}")
+    sqlite_close(db)
+    res = ok_env("\"run_id\":" + json(r.id) + ",\"agent_id\":" + json(a.id) + ",\"name\":" + json(a.name) + ",\"prompt\":" + json(a.prompt) + ",\"model\":" + json(a.model) + ",\"budget_microeur\":" + str(a.budget_microeur))
+}
+
+// POST /v1/run/events {run_id, kind, data} — worker streams journal entries.
+func h_run_events(req) (res) {
+    db := dbopen()
+    tid, ok := worker_tenant(db, req)
+    if ok == 0 {
+        res = err_env(81, "unauthorized", "worker token invalid", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    run_id, _ := json_get(req.body, ".run_id")
+    kind, _ := json_get(req.body, ".kind")
+    data, _ := json_get(req.body, ".data")
+    run_id = unq(run_id)
+    kind = unq(kind)
+    if run_owned(db, run_id, tid) == 0 {
+        res = err_env(92, "resource_not_found", "no such run", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    journal(db, run_id, kind, data)
+    sqlite_close(db)
+    res = ok_env("\"recorded\":true")
+}
+
+// POST /v1/run/done {run_id, exit_reason} — close the run, bill it, report out.
+func h_run_done(req) (res) {
+    db := dbopen()
+    tid, ok := worker_tenant(db, req)
+    if ok == 0 {
+        res = err_env(81, "unauthorized", "worker token invalid", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    run_id, _ := json_get(req.body, ".run_id")
+    reason, _ := json_get(req.body, ".exit_reason")
+    run_id = unq(run_id)
+    reason = unq(reason)
+    if run_owned(db, run_id, tid) == 0 {
+        res = err_env(92, "resource_not_found", "no such run", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    sqlite_exec(db, "UPDATE runs SET status = 'done', finished_at = ?, exit_reason = ? WHERE id = ?", []string{str(now()), reason, run_id})
+    journal(db, run_id, "done", "{\"exit_reason\":" + json(reason) + "}")
+    charge_run(db, run_id)
+    report_run(db, run_id)
+    sqlite_close(db)
+    res = ok_env("\"run_id\":" + json(run_id) + ",\"status\":\"done\"")
+}
+
+// POST /v1/run/kill {id} — owner-side kill switch: the proxy starves the run's
+// next LLM call, the worker loop winds down within one turn.
+func h_run_kill(req) (res) {
+    db := dbopen()
+    tid, ok := bearer_tenant(db, req)
+    if ok == 0 {
+        res = err_env(81, "unauthorized", "bearer token invalid", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    id, _ := json_get(req.body, ".id")
+    id = unq(id)
+    if run_owned(db, id, tid) == 0 {
+        res = err_env(92, "resource_not_found", "no such run", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    sqlite_exec(db, "UPDATE runs SET status = 'killed' WHERE id = ? AND (status = 'queued' OR status = 'running')", []string{id})
+    journal(db, id, "killed", "{}")
+    sqlite_close(db)
+    res = ok_env("\"run_id\":" + json(id) + ",\"status\":\"killed\"")
+}
+
+// GET /v1/runs?agent= — history for one agent (owner view).
+func h_runs(req) (res) {
+    db := dbopen()
+    tid, ok := bearer_tenant(db, req)
+    if ok == 0 {
+        res = err_env(81, "unauthorized", "bearer token invalid", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    agent_id := query(req, "agent")
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason FROM runs WHERE agent_id = ? AND tenant_id = ? ORDER BY scheduled_at DESC LIMIT 50", []string{agent_id, tid})
+    rs := parse(rows, []RunRow{})
+    out := "\"runs\":["
+    i := 0
+    for i < len(rs) {
+        if i > 0 { out = out + "," }
+        r := rs[i]
+        out = out + "{\"id\":" + json(r.id) + ",\"status\":" + json(r.status) + ",\"cost_microeur\":" + str(r.cost_microeur) + ",\"tokens_in\":" + str(r.tokens_in) + ",\"tokens_out\":" + str(r.tokens_out) + ",\"exit_reason\":" + json(r.exit_reason) + "}"
+        i = i + 1
+    }
+    out = out + "]"
+    sqlite_close(db)
+    res = ok_env(out)
+}
+
+// GET /v1/run?id= — one run + its full journal.
+func h_run_detail(req) (res) {
+    db := dbopen()
+    tid, ok := bearer_tenant(db, req)
+    if ok == 0 {
+        res = err_env(81, "unauthorized", "bearer token invalid", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    id := query(req, "id")
+    if run_owned(db, id, tid) == 0 {
+        res = err_env(92, "resource_not_found", "no such run", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    erows := sqlite_query(db, "SELECT run_id, ts, kind, data FROM events WHERE run_id = ? ORDER BY ts ASC", []string{id})
+    evs := parse(erows, []EventRow{})
+    out := "\"run_id\":" + json(id) + ",\"journal\":["
+    i := 0
+    for i < len(evs) {
+        if i > 0 { out = out + "," }
+        e := evs[i]
+        out = out + "{\"ts\":" + str(e.ts) + ",\"kind\":" + json(e.kind) + ",\"data\":" + json(e.data) + "}"
+        i = i + 1
+    }
+    out = out + "]"
+    sqlite_close(db)
+    res = ok_env(out)
+}
+
+func run_owned(db, run_id, tenant_id) (ok) {
+    ok = 0
+    rows := sqlite_query(db, "SELECT COUNT(*) AS n FROM runs WHERE id = ? AND tenant_id = ?", []string{run_id, tenant_id})
+    cnt := parse(rows, []CntRow{})
+    if len(cnt) > 0 && cnt[0].n > 0 { ok = 1 }
+}

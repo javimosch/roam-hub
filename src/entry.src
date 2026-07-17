@@ -1,0 +1,5 @@
+// entry — the real main(). server.src defines app_main() so test compositions
+// can bring their own main() without a duplicate-main conflict.
+func main() {
+    app_main()
+}

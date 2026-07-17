@@ -1,0 +1,39 @@
+// billing.src — peage merchant integration. Per finished run:
+//   charge = cost_microeur × margin (1.3) + flat run fee (€0.01)
+// idempotency key = run id, so a retried /v1/run/done charges once.
+// Idiom mirrors grepapi src/billing.src (http_request against PEAGE_URL with
+// PEAGE_MERCHANT_KEY). Insolvency never fails silently — trigger.src records a
+// payment_required journal event and the run is 'blocked'.
+
+func peage_api() (u) {
+    u = env("PEAGE_URL")
+    if u == "" { u = "https://peage.intrane.fr" }
+}
+
+func run_fee_microeur() (f) {
+    f = 10000
+}
+
+func margin_pct() (m) {
+    m = 130
+}
+
+// solvent — pre-queue solvency probe for a tenant's wallet.
+// TODO(M0-slice-5): call peage solvency endpoint; fail-open (1) when peage is
+// unreachable so an outage doesn't freeze every agent, and journal the fact.
+func solvent(tenant_id) (ok) {
+    ok = 1
+}
+
+// charge_run — called from h_run_done. TODO(M0-slice-5): resolve the tenant's
+// wallet, then POST /v1/charge with amount = cost×margin+fee, memo, idem=run_id
+// (exact pattern in grepapi billing.src). Record receipt or typed failure in
+// the run journal either way.
+func charge_run(db, run_id) {
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason FROM runs WHERE id = ?", []string{run_id})
+    rs := parse(rows, []RunRow{})
+    if len(rs) == 0 { return }
+    r := rs[0]
+    amount := r.cost_microeur * margin_pct() / 100 + run_fee_microeur()
+    journal(db, run_id, "billing_pending", "{\"amount_microeur\":" + str(amount) + ",\"note\":\"peage charge lands in M0 slice 5\"}")
+}

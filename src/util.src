@@ -1,0 +1,86 @@
+// util.src — request helpers + the bible-compliant error envelope.
+// Every error is a typed object: {type, code, recoverable, retry_after, suggestions}
+// mirrored by the HTTP status and (in the maa CLI) the process exit code.
+// Ranges: 80-89 input, 90-99 resource/state, 100-109 external/transient, 110-119 internal.
+
+func pathof(req) (p) {
+    parts := split(req.path, "?")
+    p = parts[0]
+}
+
+func api_version() (v) {
+    v = "1"
+}
+
+func ok_env(body) (r) {
+    r = response("200 OK", "application/json", "{\"v\":\"" + api_version() + "\"," + body + "}")
+}
+
+// err_env — typed error envelope. code follows the semantic ranges above;
+// http status is derived (4xx for 80-89, 404 for 90-99, 502 for 100-109, 500 for 110+).
+func err_env(code, etype, msg, recoverable, suggestions) (r) {
+    status := "400 Bad Request"
+    if code == 81 { status = "401 Unauthorized" }
+    if code >= 90 && code <= 99 { status = "404 Not Found" }
+    if code >= 100 && code <= 109 { status = "502 Bad Gateway" }
+    if code >= 110 { status = "500 Internal Server Error" }
+    rec := "false"
+    if recoverable == 1 { rec = "true" }
+    b := "{\"v\":\"" + api_version() + "\",\"ok\":false,\"error\":{\"type\":" + json(etype) + ",\"code\":" + str(code) + ",\"message\":" + json(msg) + ",\"recoverable\":" + rec + ",\"retry_after\":null,\"suggestions\":" + suggestions + "}}"
+    r = response(status, "application/json", b)
+}
+
+func no_suggestions() (s) {
+    s = "[]"
+}
+
+// unq — strip the quotes json_get leaves on string values.
+func unq(s) (out) {
+    out = s
+    if len(s) >= 2 && has_prefix(s, "\"") && has_suffix(s, "\"") {
+        out = substr(s, 1, len(s) - 1)
+    }
+}
+
+// jint — absence-safe int extraction from a JSON body.
+func jint(body, path) (n) {
+    raw, err := json_get(body, path)
+    if err != "" { return 0 }
+    n = parse_int(raw)
+}
+
+func newid() (s) {
+    s = to_hex(rand_bytes(16))
+}
+
+func tok_hash(t) (h) {
+    h = sha256(t)
+}
+
+// bearer_tenant — resolve Authorization: Bearer maa_... to a tenant id.
+func bearer_tenant(db, req) (tenant_id, ok) {
+    tenant_id = ""
+    ok = 0
+    h := header(req, "Authorization")
+    if !has_prefix(h, "Bearer ") { return tenant_id, ok }
+    tok := substr(h, 7, len(h))
+    rows := sqlite_query(db, "SELECT id, email, token_hash, worker_token_hash, created FROM tenants WHERE token_hash = ?", []string{tok_hash(tok)})
+    ts := parse(rows, []TenantRow{})
+    if len(ts) == 0 { return tenant_id, ok }
+    tenant_id = ts[0].id
+    ok = 1
+}
+
+// worker_tenant — same, against the worker token (roam --worker auth).
+func worker_tenant(db, req) (tenant_id, ok) {
+    tenant_id = ""
+    ok = 0
+    h := header(req, "Authorization")
+    if !has_prefix(h, "Bearer ") { return tenant_id, ok }
+    tok := substr(h, 7, len(h))
+    rows := sqlite_query(db, "SELECT id, email, token_hash, worker_token_hash, created FROM tenants WHERE worker_token_hash = ?", []string{tok_hash(tok)})
+    ts := parse(rows, []TenantRow{})
+    if len(ts) == 0 { return tenant_id, ok }
+    tenant_id = ts[0].id
+    ok = 1
+}
