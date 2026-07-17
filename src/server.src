@@ -22,6 +22,7 @@ func handle(req) (res) {
     if req.method == "GET" && p == "/v1/work" { return h_work(req) }
     if req.method == "POST" && p == "/v1/llm" { return h_llm(req) }
     if req.method == "POST" && p == "/v1/messages" { return h_llm(req) }
+    if req.method == "POST" && p == "/chat/completions" { return h_llm(req) }
     if req.method == "POST" && p == "/v1/run/events" { return h_run_events(req) }
     if req.method == "POST" && p == "/v1/run/done" { return h_run_done(req) }
     return err_env(92, "resource_not_found", "no such endpoint", 0, "[\"GET /v1/guide for the endpoint list\"]")
