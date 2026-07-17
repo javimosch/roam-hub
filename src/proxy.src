@@ -1,13 +1,21 @@
 // proxy.src — the metered LLM proxy: the product's spine. Workers hold NO model
-// keys; every model call is POST /v1/llm {run_id, body} and the hub forwards to
-// the upstream (Anthropic or OpenRouter, MAA_LLM_* env) with its own key, counts
-// exact tokens from the response, accumulates run cost, and refuses once the
-// run's budget is spent or the run was killed. Central metering = exact billing
-// + hard budget cut-off + a kill switch that starves the loop within one turn.
+// keys; every model call is POST /v1/llm (run id in the X-Maa-Run header, body =
+// the upstream messages payload, passed through opaque) and the hub forwards to
+// the upstream with its own key, counts exact tokens from the response,
+// accumulates run cost, and refuses once the run's budget is spent or the run
+// was killed. Central metering = exact billing + hard budget cut-off + a kill
+// switch that starves the loop within one turn.
+//
+// run id travels in a header (not the body) so a stock roam engine can point
+// its provider base URL at the hub with extra headers and need zero payload
+// rewriting.
+//
+// Upstreams (MAA_LLM_PROVIDER): "anthropic" (default, MAA_ANTHROPIC_KEY) or
+// "openrouter" (MAA_OPENROUTER_KEY). Usage extraction covers both shapes:
+// anthropic .usage.input_tokens/output_tokens, openai .usage.prompt_tokens/
+// completion_tokens.
 
-// POST /v1/llm {run_id, body} — body is the upstream messages payload, passed
-// through opaque. TODO(M0-slice-4): forward via http_request, extract
-// usage.input_tokens/output_tokens, price via model rates, accumulate on the run.
+// POST /v1/llm — headers: Authorization (worker token), X-Maa-Run (run id).
 func h_llm(req) (res) {
     db := dbopen()
     tid, ok := worker_tenant(db, req)
@@ -16,8 +24,12 @@ func h_llm(req) (res) {
         sqlite_close(db)
         return res
     }
-    run_id, _ := json_get(req.body, ".run_id")
-    run_id = unq(run_id)
+    run_id := header(req, "X-Maa-Run")
+    if run_id == "" {
+        res = err_env(80, "invalid_argument", "X-Maa-Run header required", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
     if run_owned(db, run_id, tid) == 0 {
         res = err_env(92, "resource_not_found", "no such run", 0, no_suggestions())
         sqlite_close(db)
@@ -38,8 +50,99 @@ func h_llm(req) (res) {
         sqlite_close(db)
         return res
     }
+    url, headers, cfg_err := upstream_config()
+    if cfg_err != "" {
+        res = err_env(110, "misconfigured", cfg_err, 0, "[\"set MAA_ANTHROPIC_KEY or MAA_OPENROUTER_KEY on the hub\"]")
+        sqlite_close(db)
+        return res
+    }
+    status, resp, herr := http_request("POST", url, headers, req.body)
+    if herr != "" {
+        journal(db, run_id, "llm_error", "{\"type\":\"upstream_unreachable\"}")
+        res = err_env(105, "upstream_unreachable", "LLM upstream unreachable", 1, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    if status != 200 {
+        journal(db, run_id, "llm_error", "{\"type\":\"upstream_error\",\"status\":" + str(status) + "}")
+        res = response(str(status) + " Upstream Error", "application/json", resp)
+        sqlite_close(db)
+        return res
+    }
+    tin := usage_in(resp)
+    tout := usage_out(resp)
+    model, _ := json_get(req.body, ".model")
+    model = unq(model)
+    cost := llm_cost_microeur(model, tin, tout)
+    sqlite_exec(db, "UPDATE runs SET cost_microeur = cost_microeur + ?, tokens_in = tokens_in + ?, tokens_out = tokens_out + ? WHERE id = ?", []string{str(cost), str(tin), str(tout), run_id})
+    journal(db, run_id, "llm_call", "{\"model\":" + json(model) + ",\"tokens_in\":" + str(tin) + ",\"tokens_out\":" + str(tout) + ",\"cost_microeur\":" + str(cost) + "}")
     sqlite_close(db)
-    res = err_env(110, "not_implemented", "LLM forwarding lands in M0 slice 4", 0, "[\"see docs/M0.md\"]")
+    res = response("200 OK", "application/json", resp)
+}
+
+// upstream_config — resolve provider url + auth headers from env.
+func upstream_config() (url, headers, cfg_err) {
+    url = ""
+    headers = []string{}
+    cfg_err = ""
+    provider := env("MAA_LLM_PROVIDER")
+    if provider == "" { provider = "anthropic" }
+    if provider == "anthropic" {
+        key := env("MAA_ANTHROPIC_KEY")
+        if key == "" { cfg_err = "MAA_ANTHROPIC_KEY not set"  return url, headers, cfg_err }
+        url = env("MAA_LLM_URL")
+        if url == "" { url = "https://api.anthropic.com/v1/messages" }
+        headers = []string{"content-type: application/json", "x-api-key: " + key, "anthropic-version: 2023-06-01"}
+        return url, headers, cfg_err
+    }
+    if provider == "openrouter" {
+        key := env("MAA_OPENROUTER_KEY")
+        if key == "" { cfg_err = "MAA_OPENROUTER_KEY not set"  return url, headers, cfg_err }
+        url = env("MAA_LLM_URL")
+        if url == "" { url = "https://openrouter.ai/api/v1/chat/completions" }
+        headers = []string{"content-type: application/json", "authorization: Bearer " + key}
+        return url, headers, cfg_err
+    }
+    cfg_err = "unknown MAA_LLM_PROVIDER: " + provider
+}
+
+// usage_in / usage_out — absence-safe extraction covering both API shapes.
+func usage_in(resp) (n) {
+    n = jint(resp, ".usage.input_tokens")
+    if n == 0 { n = jint(resp, ".usage.prompt_tokens") }
+}
+
+func usage_out(resp) (n) {
+    n = jint(resp, ".usage.output_tokens")
+    if n == 0 { n = jint(resp, ".usage.completion_tokens") }
+}
+
+// llm_cost_microeur — price a call in integer micro-EUR. Rates are µ€ per
+// MILLION tokens; cost = tokens × rate / 1_000_000. Defaults approximate
+// haiku-class pricing ($1/$5 per Mtok at ~0.93 €/$); override per-hub with
+// MAA_RATE_IN_MICRO / MAA_RATE_OUT_MICRO. Per-model table grows as real
+// models are onboarded — unknown models bill at the default rate.
+func llm_cost_microeur(model, tin, tout) (cost) {
+    rin := rate_default_in()
+    rout := rate_default_out()
+    if has_prefix(model, "claude-haiku") { rin = 930000  rout = 4650000 }
+    if has_prefix(model, "claude-sonnet") { rin = 2790000  rout = 13950000 }
+    if has_prefix(model, "claude-opus") { rin = 13950000  rout = 69750000 }
+    cost = tin * rin / 1000000 + tout * rout / 1000000
+}
+
+func rate_default_in() (r) {
+    r = jenv_int("MAA_RATE_IN_MICRO", 930000)
+}
+
+func rate_default_out() (r) {
+    r = jenv_int("MAA_RATE_OUT_MICRO", 4650000)
+}
+
+func jenv_int(name, dflt) (n) {
+    v := env(name)
+    if v == "" { n = dflt  return n }
+    n = parse_int(v)
 }
 
 func budget_exhausted(db, r) (over, budget) {

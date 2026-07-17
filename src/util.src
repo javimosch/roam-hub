@@ -64,7 +64,7 @@ func bearer_tenant(db, req) (tenant_id, ok) {
     h := header(req, "Authorization")
     if !has_prefix(h, "Bearer ") { return tenant_id, ok }
     tok := substr(h, 7, len(h))
-    rows := sqlite_query(db, "SELECT id, email, token_hash, worker_token_hash, created FROM tenants WHERE token_hash = ?", []string{tok_hash(tok)})
+    rows := sqlite_query(db, "SELECT id, email, token_hash, worker_token_hash, peage_wallet, created FROM tenants WHERE token_hash = ?", []string{tok_hash(tok)})
     ts := parse(rows, []TenantRow{})
     if len(ts) == 0 { return tenant_id, ok }
     tenant_id = ts[0].id
@@ -78,7 +78,7 @@ func worker_tenant(db, req) (tenant_id, ok) {
     h := header(req, "Authorization")
     if !has_prefix(h, "Bearer ") { return tenant_id, ok }
     tok := substr(h, 7, len(h))
-    rows := sqlite_query(db, "SELECT id, email, token_hash, worker_token_hash, created FROM tenants WHERE worker_token_hash = ?", []string{tok_hash(tok)})
+    rows := sqlite_query(db, "SELECT id, email, token_hash, worker_token_hash, peage_wallet, created FROM tenants WHERE worker_token_hash = ?", []string{tok_hash(tok)})
     ts := parse(rows, []TenantRow{})
     if len(ts) == 0 { return tenant_id, ok }
     tenant_id = ts[0].id

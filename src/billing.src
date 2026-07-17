@@ -1,39 +1,83 @@
 // billing.src — peage merchant integration. Per finished run:
-//   charge = cost_microeur × margin (1.3) + flat run fee (€0.01)
+//   charge_cents = ceil((cost_microeur × margin) / 10000) + flat run fee (€0.01)
 // idempotency key = run id, so a retried /v1/run/done charges once.
-// Idiom mirrors grepapi src/billing.src (http_request against PEAGE_URL with
-// PEAGE_MERCHANT_KEY). Insolvency never fails silently — trigger.src records a
-// payment_required journal event and the run is 'blocked'.
+// peage amounts are CENTS; internal costing is integer micro-EUR (10000 µ€ = 1¢).
+// The tenant's wallet token is stored on the tenant row (POST /v1/wallet);
+// solvency is probed pre-queue via GET /v1/wallet (balance_cents). Insolvency
+// never fails silently — trigger.src records a payment_required journal event.
 
 func peage_api() (u) {
     u = env("PEAGE_URL")
     if u == "" { u = "https://peage.intrane.fr" }
 }
 
-func run_fee_microeur() (f) {
-    f = 10000
+func run_fee_cents() (f) {
+    f = 1
 }
 
 func margin_pct() (m) {
     m = 130
 }
 
-// solvent — pre-queue solvency probe for a tenant's wallet.
-// TODO(M0-slice-5): call peage solvency endpoint; fail-open (1) when peage is
-// unreachable so an outage doesn't freeze every agent, and journal the fact.
-func solvent(tenant_id) (ok) {
-    ok = 1
+func min_balance_cents() (m) {
+    m = 5
 }
 
-// charge_run — called from h_run_done. TODO(M0-slice-5): resolve the tenant's
-// wallet, then POST /v1/charge with amount = cost×margin+fee, memo, idem=run_id
-// (exact pattern in grepapi billing.src). Record receipt or typed failure in
-// the run journal either way.
+func tenant_wallet(db, tenant_id) (w) {
+    w = ""
+    rows := sqlite_query(db, "SELECT id, email, token_hash, worker_token_hash, peage_wallet, created FROM tenants WHERE id = ?", []string{tenant_id})
+    ts := parse(rows, []TenantRow{})
+    if len(ts) == 0 { return w }
+    w = ts[0].peage_wallet
+}
+
+// solvent — pre-queue solvency probe: wallet set AND balance above the floor.
+// Fail-OPEN when peage is unreachable (an outage must not freeze every agent);
+// fail-CLOSED when no wallet is configured (the charge would certainly fail).
+func solvent(tenant_id) (ok) {
+    ok = 0
+    db := dbopen()
+    w := tenant_wallet(db, tenant_id)
+    sqlite_close(db)
+    if w == "" { return ok }
+    status, resp, herr := http_request("GET", peage_api() + "/v1/wallet", []string{"authorization: Bearer " + w}, "")
+    if herr != "" { ok = 1  return ok }
+    if status != 200 { return ok }
+    bal := jint(resp, ".balance_cents")
+    if bal >= min_balance_cents() { ok = 1 }
+}
+
+// charge_run — called from h_run_done. Charges the tenant's peage wallet via
+// the hub's merchant key; records receipt or typed failure in the run journal
+// either way. No internal retries (bible rule) — a failed charge is a journal
+// event the owner acts on; idempotency key = run id makes re-billing safe.
 func charge_run(db, run_id) {
     rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason FROM runs WHERE id = ?", []string{run_id})
     rs := parse(rows, []RunRow{})
     if len(rs) == 0 { return }
     r := rs[0]
-    amount := r.cost_microeur * margin_pct() / 100 + run_fee_microeur()
-    journal(db, run_id, "billing_pending", "{\"amount_microeur\":" + str(amount) + ",\"note\":\"peage charge lands in M0 slice 5\"}")
+    margin_microeur := r.cost_microeur * margin_pct() / 100
+    amount := (margin_microeur + 9999) / 10000 + run_fee_cents()
+    key := env("PEAGE_MERCHANT_KEY")
+    if key == "" {
+        journal(db, run_id, "billing_skipped", "{\"reason\":\"PEAGE_MERCHANT_KEY not set on hub\",\"amount_cents\":" + str(amount) + "}")
+        return
+    }
+    w := tenant_wallet(db, r.tenant_id)
+    if w == "" {
+        journal(db, run_id, "billing_failed", "{\"type\":\"no_wallet\",\"recoverable\":true,\"hint\":\"POST /v1/wallet with your peage wallet_token\",\"amount_cents\":" + str(amount) + "}")
+        return
+    }
+    body := "{\"wallet_token\":" + json(w) + ",\"amount_cents\":" + str(amount) + ",\"memo\":\"machin-agents run " + run_id + "\",\"idempotency_key\":" + json(run_id) + "}"
+    status, resp, herr := http_request("POST", peage_api() + "/v1/charge", []string{"content-type: application/json", "authorization: Bearer " + key}, body)
+    if herr != "" {
+        journal(db, run_id, "billing_failed", "{\"type\":\"peage_unreachable\",\"recoverable\":true,\"amount_cents\":" + str(amount) + "}")
+        return
+    }
+    if status != 200 {
+        journal(db, run_id, "billing_failed", "{\"type\":\"charge_rejected\",\"status\":" + str(status) + ",\"body\":" + json(resp) + ",\"amount_cents\":" + str(amount) + "}")
+        return
+    }
+    rc, _ := json_get(resp, ".receipt")
+    journal(db, run_id, "billed", "{\"amount_cents\":" + str(amount) + ",\"receipt\":" + json(unq(rc)) + "}")
 }

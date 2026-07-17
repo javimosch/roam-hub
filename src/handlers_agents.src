@@ -23,7 +23,9 @@ func h_signup(req) (res) {
     id := newid()
     tok := "maa_" + newid()
     wtok := "maw_" + newid()
-    sqlite_exec(db, "INSERT INTO tenants(id, email, token_hash, worker_token_hash, created) VALUES(?, ?, ?, ?, ?)", []string{id, email, tok_hash(tok), tok_hash(wtok), str(now())})
+    wallet, _ := json_get(req.body, ".peage_wallet")
+    wallet = unq(wallet)
+    sqlite_exec(db, "INSERT INTO tenants(id, email, token_hash, worker_token_hash, peage_wallet, created) VALUES(?, ?, ?, ?, ?, ?)", []string{id, email, tok_hash(tok), tok_hash(wtok), wallet, str(now())})
     sqlite_close(db)
     res = ok_env("\"token\":" + json(tok) + ",\"worker_token\":" + json(wtok))
 }
@@ -105,6 +107,29 @@ func h_agent_setstatus(req, status) (res) {
     sqlite_exec(db, "UPDATE agents SET status = ? WHERE id = ? AND tenant_id = ?", []string{status, id, tid})
     sqlite_close(db)
     res = ok_env("\"id\":" + json(id) + ",\"status\":" + json(status))
+}
+
+// POST /v1/wallet {wallet_token} — attach/replace the tenant's peage wallet.
+// Runs of a wallet-less tenant queue as 'blocked' (payment_required), so this
+// is the one piece of state a new tenant must set before going autonomous.
+func h_wallet_set(req) (res) {
+    db := dbopen()
+    tid, ok := bearer_tenant(db, req)
+    if ok == 0 {
+        res = err_env(81, "unauthorized", "bearer token invalid", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    w, _ := json_get(req.body, ".wallet_token")
+    w = unq(w)
+    if w == "" {
+        res = err_env(80, "invalid_argument", "wallet_token is required", 0, "[\"create one: POST https://peage.intrane.fr/v1/wallets\"]")
+        sqlite_close(db)
+        return res
+    }
+    sqlite_exec(db, "UPDATE tenants SET peage_wallet = ? WHERE id = ?", []string{w, tid})
+    sqlite_close(db)
+    res = ok_env("\"wallet\":\"set\"")
 }
 
 func default_model() (m) {
