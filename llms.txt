@@ -22,12 +22,12 @@ All responses: versioned JSON `{"v":"1", ...}`. Errors are typed:
   no headers needed). Flood-safe: max 1 queued run per agent, extra hits coalesce.
 - `GET  /v1/agents` — list your specs
 - `GET  /v1/agent?id=` — one spec + last run summary
-- `POST /v1/agent/pause` {id} · `POST /v1/agent/resume` {id}
+- `POST /v1/agent/pause` {id} · `POST /v1/agent/resume` {id} · `POST /v1/agent/delete` {id} (runs/journals remain as billing history)
 - `GET  /v1/runs?agent=` — run history (cost, tokens, exit_reason)
 - `GET  /v1/run?id=` — run detail + full journal (append-only event log)
 - Worker protocol (`roam worker --hub <url> --token <rhw_...>`): `GET /v1/work`,
   `POST /v1/llm` (aliases: `/v1/messages` anthropic-shaped, `/chat/completions`
-  openai-shaped; run id in `X-Maa-Run` header, auth via Bearer or x-api-key),
+  openai-shaped; run id in `X-Roam-Run` header, auth via Bearer or x-api-key),
   `POST /v1/run/events`, `POST /v1/run/done`
 
 ## Billing

@@ -188,6 +188,34 @@ func h_agent_setstatus(req, status) (res) {
     res = ok_env("\"id\":" + json(id) + ",\"status\":" + json(status))
 }
 
+// POST /v1/agent/delete {id} — remove a spec. Runs and journals REMAIN (they
+// are billing history; receipts reference them); only the spec and its trigger
+// die. Queued runs of the agent are cancelled so a worker can't claim orphans.
+// Born from real use: the first cleanup pass found 13 paused test specs and no
+// way to remove them.
+func h_agent_delete(req) (res) {
+    db := dbopen()
+    tid, ok := bearer_tenant(db, req)
+    if ok == 0 {
+        res = err_env(81, "unauthorized", "bearer token invalid", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    id, _ := json_get(req.body, ".id")
+    id = unq(id)
+    rows := sqlite_query(db, "SELECT COUNT(*) AS n FROM agents WHERE id = ? AND tenant_id = ?", []string{id, tid})
+    cnt := parse(rows, []CntRow{})
+    if len(cnt) == 0 || cnt[0].n == 0 {
+        res = err_env(92, "resource_not_found", "no such agent", 0, "[\"GET /v1/agents to list ids\"]")
+        sqlite_close(db)
+        return res
+    }
+    sqlite_exec(db, "UPDATE runs SET status = 'cancelled', exit_reason = 'agent_deleted' WHERE agent_id = ? AND (status = 'queued' OR status = 'blocked')", []string{id})
+    sqlite_exec(db, "DELETE FROM agents WHERE id = ? AND tenant_id = ?", []string{id, tid})
+    sqlite_close(db)
+    res = ok_env("\"id\":" + json(id) + ",\"deleted\":true")
+}
+
 // POST /v1/wallet {wallet_token} — attach/replace the tenant's peage wallet.
 // Runs of a wallet-less tenant queue as 'blocked' (payment_required), so this
 // is the one piece of state a new tenant must set before going autonomous.

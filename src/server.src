@@ -17,6 +17,7 @@ func handle(req) (res) {
     if req.method == "GET" && p == "/v1/agents" { return h_agent_list(req) }
     if req.method == "POST" && p == "/v1/agent/pause" { return h_agent_setstatus(req, "paused") }
     if req.method == "POST" && p == "/v1/agent/resume" { return h_agent_setstatus(req, "active") }
+    if req.method == "POST" && p == "/v1/agent/delete" { return h_agent_delete(req) }
     if req.method == "GET" && p == "/v1/runs" { return h_runs(req) }
     if req.method == "GET" && p == "/v1/run" { return h_run_detail(req) }
     if req.method == "POST" && p == "/v1/run/kill" { return h_run_kill(req) }

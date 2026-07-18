@@ -96,6 +96,10 @@ func main() {
         if len(a) < 3 { write(2, "usage: rhub resume <agent_id>\n")  exit(80) }
         exit(call("POST", "/v1/agent/resume", "{\"id\":" + jq(a[2]) + "}", need_token()))
     }
+    if cmd == "delete" {
+        if len(a) < 3 { write(2, "usage: rhub delete <agent_id>\n")  exit(80) }
+        exit(call("POST", "/v1/agent/delete", "{\"id\":" + jq(a[2]) + "}", need_token()))
+    }
     if cmd == "runs" {
         if len(a) < 3 { write(2, "usage: rhub runs <agent_id>\n")  exit(80) }
         exit(call("GET", "/v1/runs?agent=" + a[2], "", need_token()))
