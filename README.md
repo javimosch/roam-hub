@@ -91,6 +91,13 @@ docs/         VISION.md (north star + what we will NOT build) · M0.md (shipped 
 llms.txt      the front door for agents
 ```
 
+## Case study
+
+**[The outage a phone tap fixed](docs/CASE-STUDY-guarded-remediation.md)** — perrus
+monitoring → hub trigger → agent diagnoses on-box → parks on `systemctl restart` →
+one tap → service restored, verified, billed 3¢. Includes the unplanned bad-alert
+second act where every safety rail fired in sequence.
+
 ## Status
 
 M0–M2 shipped and live-proven end to end: scheduled + webhook triggers, metered
