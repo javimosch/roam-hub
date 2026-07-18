@@ -93,10 +93,11 @@ llms.txt      the front door for agents
 
 ## Case study
 
-**[The outage a phone tap fixed](docs/CASE-STUDY-guarded-remediation.md)** — perrus
-monitoring → hub trigger → agent diagnoses on-box → parks on `systemctl restart` →
-one tap → service restored, verified, billed 3¢. Includes the unplanned bad-alert
-second act where every safety rail fired in sequence.
+**[Guarded remediation: outage → verified recovery in 61 s, one approval](docs/CASE-STUDY-guarded-remediation.md)** —
+perrus monitoring → hub trigger → agent diagnoses on-box → parks on
+`systemctl restart` → one approval → service restored and verified, billed 3¢.
+Honest about what's staged vs real, and includes the failure case: a bad alert
+that cost 15¢ and executed nothing.
 
 ## Status
 
