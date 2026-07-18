@@ -1,10 +1,10 @@
-// db.src — SQLite layer: connection + schema. MAA_DB points tests at a temp
+// db.src — SQLite layer: connection + schema. RHUB_DB points tests at a temp
 // file; production points at the real path. Money is integer micro-EUR
 // (1_000_000 = 1 EUR) everywhere — no floats near billing.
 
 func dbpath() (p) {
-    p = env("MAA_DB")
-    if p == "" { p = "machin-agents.db" }
+    p = env("RHUB_DB")
+    if p == "" { p = "roam-hub.db" }
 }
 
 func dbopen() (db) {

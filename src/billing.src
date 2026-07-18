@@ -68,7 +68,7 @@ func charge_run(db, run_id) {
         journal(db, run_id, "billing_failed", "{\"type\":\"no_wallet\",\"recoverable\":true,\"hint\":\"POST /v1/wallet with your peage wallet_token\",\"amount_cents\":" + str(amount) + "}")
         return
     }
-    body := "{\"wallet_token\":" + json(w) + ",\"amount_cents\":" + str(amount) + ",\"memo\":\"machin-agents run " + run_id + "\",\"idempotency_key\":" + json(run_id) + "}"
+    body := "{\"wallet_token\":" + json(w) + ",\"amount_cents\":" + str(amount) + ",\"memo\":\"roam-hub run " + run_id + "\",\"idempotency_key\":" + json(run_id) + "}"
     status, resp, herr := http_request("POST", peage_api() + "/v1/charge", []string{"content-type: application/json", "authorization: Bearer " + key}, body)
     if herr != "" {
         journal(db, run_id, "billing_failed", "{\"type\":\"peage_unreachable\",\"recoverable\":true,\"amount_cents\":" + str(amount) + "}")

@@ -1,4 +1,4 @@
-// maa — the machin-agents client CLI. Thin: every command is one HTTP call to
+// rhub — the roam-hub client CLI. Thin: every command is one HTTP call to
 // the hub; the hub's versioned JSON is printed to stdout VERBATIM (the response
 // IS the interface — no reformatting layer to drift). Progress/errors on stderr.
 //
@@ -6,11 +6,11 @@
 // semantic and mirror the hub's error.code: 0 ok, 80-89 input, 90-99 resource/
 // state, 100-109 external/transient (105 = hub unreachable), 110-119 internal.
 //
-// Env: MAA_URL (default https://agents.intrane.fr), MAA_TOKEN (tenant bearer).
+// Env: RHUB_URL (default https://hub.roam.intrane.fr), RHUB_TOKEN (tenant bearer).
 
-func maa_url() (u) {
-    u = env("MAA_URL")
-    if u == "" { u = "https://agents.intrane.fr" }
+func rhub_url() (u) {
+    u = env("RHUB_URL")
+    if u == "" { u = "https://hub.roam.intrane.fr" }
 }
 
 func flagv(a, name, def) (v) {
@@ -27,9 +27,9 @@ func call(method, path, body, auth) (code) {
     code = 0
     hdrs := []string{"content-type: application/json"}
     if auth != "" { hdrs = append(hdrs, "authorization: Bearer " + auth) }
-    status, resp, herr := http_request(method, maa_url() + path, hdrs, body)
+    status, resp, herr := http_request(method, rhub_url() + path, hdrs, body)
     if herr != "" {
-        write(2, "{\"error\":{\"type\":\"hub_unreachable\",\"code\":105,\"recoverable\":true,\"hub\":\"" + maa_url() + "\"}}\n")
+        write(2, "{\"error\":{\"type\":\"hub_unreachable\",\"code\":105,\"recoverable\":true,\"hub\":\"" + rhub_url() + "\"}}\n")
         code = 105
         return code
     }
@@ -42,8 +42,8 @@ func call(method, path, body, auth) (code) {
 }
 
 func need_token() (t) {
-    t = env("MAA_TOKEN")
-    if t == "" { write(2, "MAA_TOKEN not set — maa signup <email> first, then export MAA_TOKEN\n")  exit(80) }
+    t = env("RHUB_TOKEN")
+    if t == "" { write(2, "RHUB_TOKEN not set — rhub signup <email> first, then export RHUB_TOKEN\n")  exit(80) }
 }
 
 func jq(s) (o) {
@@ -51,14 +51,14 @@ func jq(s) (o) {
 }
 
 func usage() {
-    write(2, "maa — machin-agents client (hub: " + maa_url() + ")\n")
-    write(2, "  maa signup <email> [--wallet <peage_wallet_token>]\n")
-    write(2, "  maa wallet <peage_wallet_token>\n")
-    write(2, "  maa create --name <n> --prompt <p> --every <secs> --budget <microeur> [--model <m>] [--report-url <u>]\n")
-    write(2, "  maa list | maa pause <agent_id> | maa resume <agent_id>\n")
-    write(2, "  maa runs <agent_id> | maa journal <run_id> | maa kill <run_id>\n")
-    write(2, "  maa guide\n")
-    write(2, "env: MAA_URL, MAA_TOKEN   output: hub JSON on stdout; semantic exit codes\n")
+    write(2, "rhub — roam-hub client (hub: " + rhub_url() + ")\n")
+    write(2, "  rhub signup <email> [--wallet <peage_wallet_token>]\n")
+    write(2, "  rhub wallet <peage_wallet_token>\n")
+    write(2, "  rhub create --name <n> --prompt <p> --every <secs> --budget <microeur> [--model <m>] [--report-url <u>]\n")
+    write(2, "  rhub list | rhub pause <agent_id> | rhub resume <agent_id>\n")
+    write(2, "  rhub runs <agent_id> | rhub journal <run_id> | rhub kill <run_id>\n")
+    write(2, "  rhub guide\n")
+    write(2, "env: RHUB_URL, RHUB_TOKEN   output: hub JSON on stdout; semantic exit codes\n")
 }
 
 func main() {
@@ -66,13 +66,13 @@ func main() {
     if len(a) < 2 { usage()  exit(80) }
     cmd := a[1]
     if cmd == "signup" {
-        if len(a) < 3 { write(2, "usage: maa signup <email> [--wallet <tok>]\n")  exit(80) }
+        if len(a) < 3 { write(2, "usage: rhub signup <email> [--wallet <tok>]\n")  exit(80) }
         w := flagv(a, "--wallet", "")
         body := "{\"email\":" + jq(a[2]) + ",\"peage_wallet\":" + jq(w) + "}"
         exit(call("POST", "/v1/signup", body, ""))
     }
     if cmd == "wallet" {
-        if len(a) < 3 { write(2, "usage: maa wallet <peage_wallet_token>\n")  exit(80) }
+        if len(a) < 3 { write(2, "usage: rhub wallet <peage_wallet_token>\n")  exit(80) }
         exit(call("POST", "/v1/wallet", "{\"wallet_token\":" + jq(a[2]) + "}", need_token()))
     }
     if cmd == "create" {
@@ -83,37 +83,37 @@ func main() {
         model := flagv(a, "--model", "")
         rurl := flagv(a, "--report-url", "")
         tmode := flagv(a, "--trigger-mode", "")
-        if name == "" || prompt == "" || every == "" || budget == "" { write(2, "usage: maa create --name <n> --prompt <p> --every <secs> --budget <microeur> [--model <m>] [--report-url <u>] [--trigger-mode ignore|inject]\n       --every 0 = webhook-only (fire via the returned trigger_url)\n")  exit(80) }
+        if name == "" || prompt == "" || every == "" || budget == "" { write(2, "usage: rhub create --name <n> --prompt <p> --every <secs> --budget <microeur> [--model <m>] [--report-url <u>] [--trigger-mode ignore|inject]\n       --every 0 = webhook-only (fire via the returned trigger_url)\n")  exit(80) }
         body := "{\"name\":" + jq(name) + ",\"prompt\":" + jq(prompt) + ",\"every_secs\":" + every + ",\"budget_microeur\":" + budget + ",\"model\":" + jq(model) + ",\"report_url\":" + jq(rurl) + ",\"trigger_mode\":" + jq(tmode) + "}"
         exit(call("POST", "/v1/agents", body, need_token()))
     }
     if cmd == "list" { exit(call("GET", "/v1/agents", "", need_token())) }
     if cmd == "pause" {
-        if len(a) < 3 { write(2, "usage: maa pause <agent_id>\n")  exit(80) }
+        if len(a) < 3 { write(2, "usage: rhub pause <agent_id>\n")  exit(80) }
         exit(call("POST", "/v1/agent/pause", "{\"id\":" + jq(a[2]) + "}", need_token()))
     }
     if cmd == "resume" {
-        if len(a) < 3 { write(2, "usage: maa resume <agent_id>\n")  exit(80) }
+        if len(a) < 3 { write(2, "usage: rhub resume <agent_id>\n")  exit(80) }
         exit(call("POST", "/v1/agent/resume", "{\"id\":" + jq(a[2]) + "}", need_token()))
     }
     if cmd == "runs" {
-        if len(a) < 3 { write(2, "usage: maa runs <agent_id>\n")  exit(80) }
+        if len(a) < 3 { write(2, "usage: rhub runs <agent_id>\n")  exit(80) }
         exit(call("GET", "/v1/runs?agent=" + a[2], "", need_token()))
     }
     if cmd == "journal" {
-        if len(a) < 3 { write(2, "usage: maa journal <run_id>\n")  exit(80) }
+        if len(a) < 3 { write(2, "usage: rhub journal <run_id>\n")  exit(80) }
         exit(call("GET", "/v1/run?id=" + a[2], "", need_token()))
     }
     if cmd == "approve" {
-        if len(a) < 3 { write(2, "usage: maa approve <run_id>\n")  exit(80) }
+        if len(a) < 3 { write(2, "usage: rhub approve <run_id>\n")  exit(80) }
         exit(call("POST", "/v1/run/approve", "{\"id\":" + jq(a[2]) + "}", need_token()))
     }
     if cmd == "deny" {
-        if len(a) < 3 { write(2, "usage: maa deny <run_id>\n")  exit(80) }
+        if len(a) < 3 { write(2, "usage: rhub deny <run_id>\n")  exit(80) }
         exit(call("POST", "/v1/run/deny", "{\"id\":" + jq(a[2]) + "}", need_token()))
     }
     if cmd == "kill" {
-        if len(a) < 3 { write(2, "usage: maa kill <run_id>\n")  exit(80) }
+        if len(a) < 3 { write(2, "usage: rhub kill <run_id>\n")  exit(80) }
         exit(call("POST", "/v1/run/kill", "{\"id\":" + jq(a[2]) + "}", need_token()))
     }
     if cmd == "guide" { exit(call("GET", "/v1/guide", "", "")) }

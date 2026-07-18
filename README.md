@@ -1,4 +1,4 @@
-# machin-agents
+# roam-hub
 
 **The place a machine leaves another machine working.** POST a spec, walk away,
 get a webhook.
@@ -18,15 +18,15 @@ are billed per-use via [peage](https://peage.intrane.fr).
 ## Build
 
 ```sh
-./build.sh          # machin encode src/*.src → build/server.mfl → ./machin-agents
-./machin-agents serve 8810
+./build.sh          # machin encode src/*.src → build/server.mfl → ./roam-hub
+./roam-hub serve 8810
 ```
 
 ## Layout
 
 ```
 src/*.src     hub modules (≤500 LOC each) composed by machin encode
-cli/          maa — the thin client CLI
+cli/          rhub — the thin client CLI
 docs/         VISION.md (north star) · M0.md (current slice plan)
 llms.txt      the front door for agents
 ```

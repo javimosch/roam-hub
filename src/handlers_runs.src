@@ -170,7 +170,7 @@ func h_run_detail(req) (res) {
 // ---- M1: the hosted approval loop -----------------------------------------
 // A worker that parks on a destructive command has NOBODY watching a terminal.
 // The park travels to the hub (needs_human), the owner decides out-of-band
-// (maa approve/deny), and the worker picks the decision up on its poll loop.
+// (rhub approve/deny), and the worker picks the decision up on its poll loop.
 
 // POST /v1/run/needs-human {run_id, command} — worker parks a destructive
 // command. Resets any stale decision so a prior approve can't leak onto a new
@@ -192,7 +192,7 @@ func h_needs_human(req) (res) {
         return res
     }
     sqlite_exec(db, "UPDATE runs SET status = 'awaiting', decision = '' WHERE id = ? AND status = 'running'", []string{run_id})
-    journal(db, run_id, "needs_human", "{\"command\":" + cmdv + ",\"hint\":\"maa approve <run_id> | maa deny <run_id>\"}")
+    journal(db, run_id, "needs_human", "{\"command\":" + cmdv + ",\"hint\":\"rhub approve <run_id> | rhub deny <run_id>\"}")
     sqlite_close(db)
     res = ok_env("\"parked\":true")
 }

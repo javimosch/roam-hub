@@ -1,5 +1,5 @@
 // proxy.src — the metered LLM proxy: the product's spine. Workers hold NO model
-// keys; every model call is POST /v1/llm (run id in the X-Maa-Run header, body =
+// keys; every model call is POST /v1/llm (run id in the X-Roam-Run header, body =
 // the upstream messages payload, passed through opaque) and the hub forwards to
 // the upstream with its own key, counts exact tokens from the response,
 // accumulates run cost, and refuses once the run's budget is spent or the run
@@ -10,12 +10,12 @@
 // its provider base URL at the hub with extra headers and need zero payload
 // rewriting.
 //
-// Upstreams (MAA_LLM_PROVIDER): "anthropic" (default, MAA_ANTHROPIC_KEY) or
-// "openrouter" (MAA_OPENROUTER_KEY). Usage extraction covers both shapes:
+// Upstreams (RHUB_LLM_PROVIDER): "anthropic" (default, RHUB_ANTHROPIC_KEY) or
+// "openrouter" (RHUB_OPENROUTER_KEY). Usage extraction covers both shapes:
 // anthropic .usage.input_tokens/output_tokens, openai .usage.prompt_tokens/
 // completion_tokens.
 
-// POST /v1/llm — headers: Authorization (worker token), X-Maa-Run (run id).
+// POST /v1/llm — headers: Authorization (worker token), X-Roam-Run (run id).
 func h_llm(req) (res) {
     db := dbopen()
     tid, ok := worker_tenant(db, req)
@@ -24,9 +24,9 @@ func h_llm(req) (res) {
         sqlite_close(db)
         return res
     }
-    run_id := header(req, "X-Maa-Run")
+    run_id := header(req, "X-Roam-Run")
     if run_id == "" {
-        res = err_env(80, "invalid_argument", "X-Maa-Run header required", 0, no_suggestions())
+        res = err_env(80, "invalid_argument", "X-Roam-Run header required", 0, no_suggestions())
         sqlite_close(db)
         return res
     }
@@ -52,7 +52,7 @@ func h_llm(req) (res) {
     }
     url, headers, provider, cfg_err := upstream_config()
     if cfg_err != "" {
-        res = err_env(110, "misconfigured", cfg_err, 0, "[\"set MAA_ANTHROPIC_KEY or MAA_OPENROUTER_KEY on the hub\"]")
+        res = err_env(110, "misconfigured", cfg_err, 0, "[\"set RHUB_ANTHROPIC_KEY or RHUB_OPENROUTER_KEY on the hub\"]")
         sqlite_close(db)
         return res
     }
@@ -140,7 +140,7 @@ func usage_cost_microeur(resp) (microeur, ok) {
 }
 
 func usd_to_eur_pct() (p) {
-    p = jenv_int("MAA_USD_EUR_PCT", 93)
+    p = jenv_int("RHUB_USD_EUR_PCT", 93)
 }
 
 // upstream_config — resolve provider url + auth headers from env.
@@ -148,25 +148,25 @@ func upstream_config() (url, headers, provider, cfg_err) {
     url = ""
     headers = []string{}
     cfg_err = ""
-    provider = env("MAA_LLM_PROVIDER")
+    provider = env("RHUB_LLM_PROVIDER")
     if provider == "" { provider = "anthropic" }
     if provider == "anthropic" {
-        key := env("MAA_ANTHROPIC_KEY")
-        if key == "" { cfg_err = "MAA_ANTHROPIC_KEY not set"  return url, headers, provider, cfg_err }
-        url = env("MAA_LLM_URL")
+        key := env("RHUB_ANTHROPIC_KEY")
+        if key == "" { cfg_err = "RHUB_ANTHROPIC_KEY not set"  return url, headers, provider, cfg_err }
+        url = env("RHUB_LLM_URL")
         if url == "" { url = "https://api.anthropic.com/v1/messages" }
         headers = []string{"content-type: application/json", "x-api-key: " + key, "anthropic-version: 2023-06-01"}
         return url, headers, provider, cfg_err
     }
     if provider == "openrouter" {
-        key := env("MAA_OPENROUTER_KEY")
-        if key == "" { cfg_err = "MAA_OPENROUTER_KEY not set"  return url, headers, provider, cfg_err }
-        url = env("MAA_LLM_URL")
+        key := env("RHUB_OPENROUTER_KEY")
+        if key == "" { cfg_err = "RHUB_OPENROUTER_KEY not set"  return url, headers, provider, cfg_err }
+        url = env("RHUB_LLM_URL")
         if url == "" { url = "https://openrouter.ai/api/v1/chat/completions" }
         headers = []string{"content-type: application/json", "authorization: Bearer " + key}
         return url, headers, provider, cfg_err
     }
-    cfg_err = "unknown MAA_LLM_PROVIDER: " + provider
+    cfg_err = "unknown RHUB_LLM_PROVIDER: " + provider
 }
 
 // usage_in / usage_out — absence-safe extraction covering both API shapes.
@@ -183,7 +183,7 @@ func usage_out(resp) (n) {
 // llm_cost_microeur — price a call in integer micro-EUR. Rates are µ€ per
 // MILLION tokens; cost = tokens × rate / 1_000_000. Defaults approximate
 // haiku-class pricing ($1/$5 per Mtok at ~0.93 €/$); override per-hub with
-// MAA_RATE_IN_MICRO / MAA_RATE_OUT_MICRO. Per-model table grows as real
+// RHUB_RATE_IN_MICRO / RHUB_RATE_OUT_MICRO. Per-model table grows as real
 // models are onboarded — unknown models bill at the default rate.
 func llm_cost_microeur(model, tin, tout) (cost) {
     rin := rate_default_in()
@@ -195,11 +195,11 @@ func llm_cost_microeur(model, tin, tout) (cost) {
 }
 
 func rate_default_in() (r) {
-    r = jenv_int("MAA_RATE_IN_MICRO", 930000)
+    r = jenv_int("RHUB_RATE_IN_MICRO", 930000)
 }
 
 func rate_default_out() (r) {
-    r = jenv_int("MAA_RATE_OUT_MICRO", 4650000)
+    r = jenv_int("RHUB_RATE_OUT_MICRO", 4650000)
 }
 
 func jenv_int(name, dflt) (n) {

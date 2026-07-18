@@ -21,8 +21,8 @@ func h_signup(req) (res) {
         return res
     }
     id := newid()
-    tok := "maa_" + newid()
-    wtok := "maw_" + newid()
+    tok := "rh_" + newid()
+    wtok := "rhw_" + newid()
     wallet, _ := json_get(req.body, ".peage_wallet")
     wallet = unq(wallet)
     sqlite_exec(db, "INSERT INTO tenants(id, email, token_hash, worker_token_hash, peage_wallet, created) VALUES(?, ?, ?, ?, ?, ?)", []string{id, email, tok_hash(tok), tok_hash(wtok), wallet, str(now())})
@@ -75,8 +75,8 @@ func h_agent_create(req) (res) {
 }
 
 func public_base() (u) {
-    u = env("MAA_PUBLIC")
-    if u == "" { u = "https://agents.intrane.fr" }
+    u = env("RHUB_PUBLIC")
+    if u == "" { u = "https://hub.roam.intrane.fr" }
 }
 
 // POST /t/<agent_id>/<secret> — the PUBLIC webhook trigger. No bearer auth: the
@@ -203,6 +203,6 @@ func h_wallet_set(req) (res) {
 }
 
 func default_model() (m) {
-    m = env("MAA_DEFAULT_MODEL")
+    m = env("RHUB_DEFAULT_MODEL")
     if m == "" { m = "claude-haiku-4-5" }
 }

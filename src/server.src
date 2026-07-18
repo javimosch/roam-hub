@@ -1,4 +1,4 @@
-// machin-agents — the hosted autonomous-agent runtime, agent-first.
+// roam-hub — the hosted autonomous-agent runtime, agent-first.
 // This file is the routing + lifecycle shell only; brains live in siblings:
 //   types.src db.src util.src handlers_agents.src handlers_runs.src
 //   trigger.src proxy.src billing.src report.src
@@ -7,7 +7,7 @@
 
 func handle(req) (res) {
     p := pathof(req)
-    if p == "/_health" { return ok_env("\"ok\":true,\"service\":\"machin-agents\"") }
+    if p == "/_health" { return ok_env("\"ok\":true,\"service\":\"roam-hub\"") }
     if req.method == "GET" && p == "/llms.txt" { return h_llmstxt(req) }
     if req.method == "GET" && p == "/v1/guide" { return h_guide(req) }
     if req.method == "POST" && p == "/v1/signup" { return h_signup(req) }
@@ -40,11 +40,11 @@ func h_llmstxt(req) (res) {
 // h_guide — in-band capability doc: version-exact, machine-readable. The API
 // analog of `machin guide` and of --help-json in the bible.
 func h_guide(req) (res) {
-    res = ok_env("\"service\":\"machin-agents\",\"endpoints\":[\"POST /v1/signup\",\"POST /v1/agents\",\"GET /v1/agents\",\"POST /v1/agent/pause\",\"POST /v1/agent/resume\",\"GET /v1/runs?agent=\",\"GET /v1/run?id=\",\"POST /v1/run/kill\",\"GET /v1/work\",\"POST /v1/llm\",\"POST /v1/run/events\",\"POST /v1/run/done\"],\"billing\":\"peage per run: token cost x1.3 + 10000 microeur\",\"docs\":\"https://agents.intrane.fr/llms.txt\"")
+    res = ok_env("\"service\":\"roam-hub\",\"endpoints\":[\"POST /v1/signup\",\"POST /v1/agents\",\"GET /v1/agents\",\"POST /v1/agent/pause\",\"POST /v1/agent/resume\",\"GET /v1/runs?agent=\",\"GET /v1/run?id=\",\"POST /v1/run/kill\",\"GET /v1/work\",\"POST /v1/llm\",\"POST /v1/run/events\",\"POST /v1/run/done\"],\"billing\":\"peage per run: token cost x1.3 + 10000 microeur\",\"docs\":\"https://hub.roam.intrane.fr/llms.txt\"")
 }
 
 func llms_txt() (t) {
-    t = "# machin-agents\nPOST a spec, walk away, get a webhook.\nSee GET /v1/guide for the machine-readable capability doc.\n"
+    t = "# roam-hub\nPOST a spec, walk away, get a webhook.\nSee GET /v1/guide for the machine-readable capability doc.\n"
 }
 
 func app_main() {
@@ -65,10 +65,10 @@ func app_main() {
         ensure_schema(db)
         sqlite_close(db)
         go trigger_loop()
-        write(2, "machin-agents serving :" + str(port) + "\n")
+        write(2, "roam-hub serving :" + str(port) + "\n")
         serve(port, func(req) { return handle(req) })
         return
     }
-    write(2, "usage: machin-agents serve [port] | migrate\n")
+    write(2, "usage: roam-hub serve [port] | migrate\n")
     exit(80)
 }

@@ -1,6 +1,6 @@
 // util.src — request helpers + the bible-compliant error envelope.
 // Every error is a typed object: {type, code, recoverable, retry_after, suggestions}
-// mirrored by the HTTP status and (in the maa CLI) the process exit code.
+// mirrored by the HTTP status and (in the rhub CLI) the process exit code.
 // Ranges: 80-89 input, 90-99 resource/state, 100-109 external/transient, 110-119 internal.
 
 func pathof(req) (p) {
@@ -68,7 +68,7 @@ func tok_hash(t) (h) {
     h = sha256(t)
 }
 
-// bearer_tenant — resolve Authorization: Bearer maa_... to a tenant id.
+// bearer_tenant — resolve Authorization: Bearer rh_... to a tenant id.
 func bearer_tenant(db, req) (tenant_id, ok) {
     tenant_id = ""
     ok = 0

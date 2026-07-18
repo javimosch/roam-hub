@@ -1,4 +1,12 @@
-# Vision — machin-agents
+# Vision — roam-hub
+
+> **Naming (2026-07-18):** born as "machin-agents", rebranded roam-hub on day 2.
+> roam-hub is roam's cloud half — roam runs the agent, the hub schedules,
+> meters, bills, and reports it. The family: `roam` (run it yourself) →
+> `roam-panel` (approve from your phone) → `roam-hub` (we run it for you).
+> The worker protocol is deliberately ENGINE-AGNOSTIC: anything that polls
+> `GET /v1/work` and speaks an anthropic/openai wire shape can be a worker;
+> roam is the first worker, not a hard dependency.
 
 **Last updated:** 2026-07-17
 **Status:** Active — M0 underway
@@ -10,7 +18,7 @@
 ## North star
 
 **The place a machine leaves another machine working.** POST a spec, walk away,
-get a webhook. machin-agents is a hosted autonomous-agent runtime whose
+get a webhook. roam-hub is a hosted autonomous-agent runtime whose
 customers are themselves agents (Claude Code sessions, roam instances, CI jobs)
 — never humans clicking a dashboard.
 
@@ -22,7 +30,7 @@ is *naturally agent-first*. We build only that tier, and nothing below it.
 ## The bet
 
 - **Customers are machines.** No chat UI, no widget, no human dashboard — the
-  "dashboard" is `maa runs list --json`. This is set in stone (same rule as
+  "dashboard" is `rhub runs list --json`. This is set in stone (same rule as
   machin core: agent-first positioning, no human-DX tooling).
 - **Pull-based execution.** Workers (roam binaries) poll the hub for due runs.
   The hub never SSHes into customer boxes. Fragile prod machines stay safe.
@@ -39,8 +47,8 @@ is *naturally agent-first*. We build only that tier, and nothing below it.
 
 ## Architecture (one paragraph)
 
-One MFL binary (`machin-agents`), SQLite, fronted by Traefik at
-`agents.intrane.fr` (hotify). Modules under `src/*.src`, composed by
+One MFL binary (`roam-hub`), SQLite, fronted by Traefik at
+`hub.roam.intrane.fr` (hotify). Modules under `src/*.src`, composed by
 `machin encode` — **max 500 LOC per file, no exceptions**. Workers are stock
 roam binaries running `roam --worker <hub-url> --token maa_...` — roam already
 has the engine (LLM tool-loop, workdir sandbox, gated shell, goal-verify,
@@ -75,7 +83,7 @@ The multi-assistant doc `docs/AGENTS_FRIENDLY_TOOLS.md` is the design bible:
 
 - Every endpoint returns versioned JSON: `{"v":"1", ...}`.
 - Errors are typed objects: `{type, code, recoverable, retry_after, suggestions}`.
-- Semantic exit codes in the `maa` CLI: 0 ok, 80–89 input, 90–99 resource/state,
+- Semantic exit codes in the `rhub` CLI: 0 ok, 80–89 input, 90–99 resource/state,
   100–109 external/transient, 110–119 internal bug.
 - stdout = data, stderr = progress. No colors when not a TTY. No prompts, ever.
 - The hub does not retry outbound calls on the customer's behalf — it reports

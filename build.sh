@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build machin-agents: mint canonical .mfl from framework + app modules, compile
+# Build roam-hub: mint canonical .mfl from framework + app modules, compile
 # to one native binary. Point at a local machin build with MACHIN=/path/to/machin.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -21,5 +21,5 @@ mkdir -p build
   src/entry.src \
   > build/server.mfl
 
-"$MACHIN" build build/server.mfl -o machin-agents
-echo "built ./machin-agents  —  run: ./machin-agents serve 8810"
+"$MACHIN" build build/server.mfl -o roam-hub
+echo "built ./roam-hub  —  run: ./roam-hub serve 8810"
