@@ -35,7 +35,7 @@ func h_llm(req) (res) {
         sqlite_close(db)
         return res
     }
-    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload FROM runs WHERE id = ?", []string{run_id})
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload, last_activity, reclaims FROM runs WHERE id = ?", []string{run_id})
     rs := parse(rows, []RunRow{})
     r := rs[0]
     if r.status == "killed" {
@@ -86,7 +86,7 @@ func h_llm(req) (res) {
     cost := 0
     actual, aok := usage_cost_microeur(resp)
     if aok == 1 { cost = actual  src = "actual" } else { cost = llm_cost_microeur(model, tin, tout) }
-    sqlite_exec(db, "UPDATE runs SET cost_microeur = cost_microeur + ?, tokens_in = tokens_in + ?, tokens_out = tokens_out + ? WHERE id = ?", []string{str(cost), str(tin), str(tout), run_id})
+    sqlite_exec(db, "UPDATE runs SET cost_microeur = cost_microeur + ?, tokens_in = tokens_in + ?, tokens_out = tokens_out + ?, last_activity = ? WHERE id = ?", []string{str(cost), str(tin), str(tout), str(now()), run_id})
     journal(db, run_id, "llm_call", "{\"model\":" + json(model) + ",\"tokens_in\":" + str(tin) + ",\"tokens_out\":" + str(tout) + ",\"cost_microeur\":" + str(cost) + ",\"cost_source\":" + json(src) + "}")
     sqlite_close(db)
     res = response("200 OK", "application/json", resp)

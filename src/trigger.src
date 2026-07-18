@@ -5,7 +5,42 @@
 // triggers are M2+ (see VISION.md).
 
 func tick_secs() (s) {
-    s = 30
+    s = jenv_int("RHUB_TICK_SECS", 30)
+}
+
+// run_stale_secs — a running/awaiting run with no worker activity for this long
+// is considered abandoned (worker died mid-run).
+func run_stale_secs() (s) {
+    s = jenv_int("RHUB_STALE_SECS", 900)
+}
+
+func max_reclaims() (n) {
+    n = jenv_int("RHUB_MAX_RECLAIMS", 1)
+}
+
+// reclaim_stale — the wall we hit in production: a worker died mid-run and the
+// run sat 'running'/'awaiting' forever. Stale runs get ONE second chance back
+// in the queue; a run that stales again is declared 'lost' — billed for what it
+// actually metered, and REPORTED (the owner's webhook hears about the loss,
+// never silence).
+func reclaim_stale(db, t) {
+    cutoff := t - run_stale_secs()
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload, last_activity, reclaims FROM runs WHERE (status = 'running' OR status = 'awaiting') AND last_activity > 0 AND last_activity < ?", []string{str(cutoff)})
+    rs := parse(rows, []RunRow{})
+    i := 0
+    for i < len(rs) {
+        r := rs[i]
+        if r.reclaims < max_reclaims() {
+            sqlite_exec(db, "UPDATE runs SET status = 'queued', reclaims = reclaims + 1, last_activity = 0, decision = '' WHERE id = ?", []string{r.id})
+            journal(db, r.id, "reclaimed", "{\"reason\":\"worker_inactive\",\"stale_secs\":" + str(run_stale_secs()) + ",\"reclaims\":" + str(r.reclaims + 1) + "}")
+        } else {
+            sqlite_exec(db, "UPDATE runs SET status = 'lost', exit_reason = 'worker_lost', finished_at = ? WHERE id = ?", []string{str(t), r.id})
+            journal(db, r.id, "lost", "{\"reason\":\"worker_lost\",\"hint\":\"is a worker running? roam worker --hub ...\"}")
+            charge_run(db, r.id)
+            report_run(db, r.id)
+        }
+        i = i + 1
+    }
 }
 
 // tick_once — one pass; called in a loop by the trigger goroutine, and directly
@@ -26,12 +61,15 @@ func tick_once() (queued) {
             journal(db, run_id, "payment_required", "{\"hint\":\"top up your peage wallet\"}")
         } else {
             journal(db, run_id, "queued", "{}")
+            online, last_seen := worker_online(db, a.tenant_id)
+            if online == 0 { journal(db, run_id, "no_worker", "{\"worker_last_seen\":" + str(last_seen) + ",\"hint\":\"no worker has polled recently — this run will wait in the queue\"}") }
             queued = queued + 1
         }
         due := t + a.every_secs
         sqlite_exec(db, "UPDATE agents SET next_due = ? WHERE id = ?", []string{str(due), a.id})
         i = i + 1
     }
+    reclaim_stale(db, t)
     sqlite_close(db)
 }
 

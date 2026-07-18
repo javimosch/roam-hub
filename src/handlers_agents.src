@@ -128,8 +128,14 @@ func h_trigger(req) (res) {
         return res
     }
     journal(db, run_id, "queued", "{\"trigger\":\"webhook\",\"mode\":" + json(a.trigger_mode) + "}")
+    online, last_seen := worker_online(db, a.tenant_id)
+    wflag := "true"
+    if online == 0 {
+        wflag = "false"
+        journal(db, run_id, "no_worker", "{\"worker_last_seen\":" + str(last_seen) + ",\"hint\":\"no worker has polled recently — this run will wait in the queue\"}")
+    }
     sqlite_close(db)
-    res = ok_env("\"queued\":true,\"run_id\":" + json(run_id))
+    res = ok_env("\"queued\":true,\"run_id\":" + json(run_id) + ",\"worker_online\":" + wflag)
 }
 
 // GET /v1/agents — list this tenant's specs.
@@ -143,7 +149,10 @@ func h_agent_list(req) (res) {
     }
     rows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode FROM agents WHERE tenant_id = ? ORDER BY created DESC", []string{tid})
     ags := parse(rows, []AgentRow{})
-    out := "\"agents\":["
+    online, last_seen := worker_online(db, tid)
+    wflag := "false"
+    if online == 1 { wflag = "true" }
+    out := "\"worker_online\":" + wflag + ",\"worker_last_seen\":" + str(last_seen) + ",\"agents\":["
     i := 0
     for i < len(ags) {
         if i > 0 { out = out + "," }

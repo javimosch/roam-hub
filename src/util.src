@@ -75,7 +75,7 @@ func bearer_tenant(db, req) (tenant_id, ok) {
     h := header(req, "Authorization")
     if !has_prefix(h, "Bearer ") { return tenant_id, ok }
     tok := substr(h, 7, len(h))
-    rows := sqlite_query(db, "SELECT id, email, token_hash, worker_token_hash, peage_wallet, created FROM tenants WHERE token_hash = ?", []string{tok_hash(tok)})
+    rows := sqlite_query(db, "SELECT id, email, token_hash, worker_token_hash, peage_wallet, created, worker_last_seen FROM tenants WHERE token_hash = ?", []string{tok_hash(tok)})
     ts := parse(rows, []TenantRow{})
     if len(ts) == 0 { return tenant_id, ok }
     tenant_id = ts[0].id
@@ -92,9 +92,27 @@ func worker_tenant(db, req) (tenant_id, ok) {
     h := header(req, "Authorization")
     if tok == "" && !has_prefix(h, "Bearer ") { return tenant_id, ok }
     if tok == "" { tok = substr(h, 7, len(h)) }
-    rows := sqlite_query(db, "SELECT id, email, token_hash, worker_token_hash, peage_wallet, created FROM tenants WHERE worker_token_hash = ?", []string{tok_hash(tok)})
+    rows := sqlite_query(db, "SELECT id, email, token_hash, worker_token_hash, peage_wallet, created, worker_last_seen FROM tenants WHERE worker_token_hash = ?", []string{tok_hash(tok)})
     ts := parse(rows, []TenantRow{})
     if len(ts) == 0 { return tenant_id, ok }
     tenant_id = ts[0].id
     ok = 1
+    // liveness: every authenticated worker call is a heartbeat (work poll, llm,
+    // events, decision poll) — one write here covers the whole protocol
+    sqlite_exec(db, "UPDATE tenants SET worker_last_seen = ? WHERE id = ?", []string{str(now()), tenant_id})
+}
+
+// worker_online — was any worker of this tenant seen within the liveness window?
+func worker_online(db, tenant_id) (online, last_seen) {
+    online = 0
+    last_seen = 0
+    rows := sqlite_query(db, "SELECT id, email, token_hash, worker_token_hash, peage_wallet, created, worker_last_seen FROM tenants WHERE id = ?", []string{tenant_id})
+    ts := parse(rows, []TenantRow{})
+    if len(ts) == 0 { return online, last_seen }
+    last_seen = ts[0].worker_last_seen
+    if last_seen > now() - worker_void_secs() { online = 1 }
+}
+
+func worker_void_secs() (s) {
+    s = jenv_int("RHUB_WORKER_VOID_SECS", 600)
 }

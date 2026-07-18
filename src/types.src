@@ -1,8 +1,8 @@
 // types.src — row types shared across modules. machin encode merges all src/*.src
 // into one namespace; keep every struct here so parse() targets live in one place.
 
-type TenantRow struct { id string  email string  token_hash string  worker_token_hash string  peage_wallet string  created int }
+type TenantRow struct { id string  email string  token_hash string  worker_token_hash string  peage_wallet string  created int  worker_last_seen int }
 type AgentRow struct { id string  tenant_id string  name string  prompt string  model string  every_secs int  budget_microeur int  report_url string  status string  next_due int  created int  trigger_secret string  trigger_mode string }
-type RunRow struct { id string  agent_id string  tenant_id string  status string  scheduled_at int  started_at int  finished_at int  cost_microeur int  tokens_in int  tokens_out int  exit_reason string  decision string  payload string }
+type RunRow struct { id string  agent_id string  tenant_id string  status string  scheduled_at int  started_at int  finished_at int  cost_microeur int  tokens_in int  tokens_out int  exit_reason string  decision string  payload string  last_activity int  reclaims int }
 type EventRow struct { run_id string  ts int  kind string  data string }
 type CntRow struct { n int }

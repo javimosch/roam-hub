@@ -43,4 +43,10 @@ ACTUAL generation cost when the provider reports it (journal `cost_source:
 - Budget is a hard ceiling enforced at the LLM proxy: when spent, the run's next
   model call gets `budget_exhausted` (recoverable:false) and the loop winds down.
 - Kill a run: `POST /v1/run/kill` {id} — the proxy starves it within one turn.
+- Worker liveness: every authenticated worker call is a heartbeat. Agent list
+  and trigger responses carry `worker_online`/`worker_last_seen`; a run queued
+  with no live worker gets a `no_worker` journal warning. A running run whose
+  worker goes silent (15 min default) is reclaimed to the queue once, then
+  declared `lost` — billed for what it metered and reported to your webhook.
+  Silence is never an outcome.
 - The hub never retries your webhook; delivery failure is a typed journal event.

@@ -12,12 +12,15 @@ func dbopen() (db) {
 }
 
 func ensure_schema(db) {
-    sqlite_exec(db, "CREATE TABLE IF NOT EXISTS tenants(id TEXT PRIMARY KEY, email TEXT UNIQUE, token_hash TEXT, worker_token_hash TEXT, peage_wallet TEXT DEFAULT '', created INTEGER)", []string{})
+    sqlite_exec(db, "CREATE TABLE IF NOT EXISTS tenants(id TEXT PRIMARY KEY, email TEXT UNIQUE, token_hash TEXT, worker_token_hash TEXT, peage_wallet TEXT DEFAULT '', created INTEGER, worker_last_seen INTEGER DEFAULT 0)", []string{})
     sqlite_exec(db, "CREATE TABLE IF NOT EXISTS agents(id TEXT PRIMARY KEY, tenant_id TEXT, name TEXT, prompt TEXT, model TEXT, every_secs INTEGER, budget_microeur INTEGER, report_url TEXT, status TEXT, next_due INTEGER, created INTEGER, trigger_secret TEXT DEFAULT '', trigger_mode TEXT DEFAULT 'ignore')", []string{})
     sqlite_exec(db, "ALTER TABLE agents ADD COLUMN trigger_secret TEXT DEFAULT ''", []string{})
     sqlite_exec(db, "ALTER TABLE agents ADD COLUMN trigger_mode TEXT DEFAULT 'ignore'", []string{})
     sqlite_exec(db, "ALTER TABLE runs ADD COLUMN payload TEXT DEFAULT ''", []string{})
-    sqlite_exec(db, "CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, agent_id TEXT, tenant_id TEXT, status TEXT, scheduled_at INTEGER, started_at INTEGER, finished_at INTEGER, cost_microeur INTEGER, tokens_in INTEGER, tokens_out INTEGER, exit_reason TEXT, decision TEXT DEFAULT '', payload TEXT DEFAULT '')", []string{})
+    sqlite_exec(db, "ALTER TABLE runs ADD COLUMN last_activity INTEGER DEFAULT 0", []string{})
+    sqlite_exec(db, "ALTER TABLE runs ADD COLUMN reclaims INTEGER DEFAULT 0", []string{})
+    sqlite_exec(db, "ALTER TABLE tenants ADD COLUMN worker_last_seen INTEGER DEFAULT 0", []string{})
+    sqlite_exec(db, "CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, agent_id TEXT, tenant_id TEXT, status TEXT, scheduled_at INTEGER, started_at INTEGER, finished_at INTEGER, cost_microeur INTEGER, tokens_in INTEGER, tokens_out INTEGER, exit_reason TEXT, decision TEXT DEFAULT '', payload TEXT DEFAULT '', last_activity INTEGER DEFAULT 0, reclaims INTEGER DEFAULT 0)", []string{})
     // M1 upgrade for pre-decision databases; harmless no-op error once applied
     sqlite_exec(db, "ALTER TABLE runs ADD COLUMN decision TEXT DEFAULT ''", []string{})
     sqlite_exec(db, "CREATE TABLE IF NOT EXISTS events(run_id TEXT, ts INTEGER, kind TEXT, data TEXT)", []string{})
