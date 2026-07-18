@@ -1,0 +1,9 @@
+[
+  {"name": "fetch", "run": "git -C /opt/roam-hub/src fetch -q origin main && echo new=$(git -C /opt/roam-hub/src rev-parse --short=12 origin/main) deployed=$(cat /opt/roam-hub/DEPLOYED_SHA 2>/dev/null || echo none)"},
+  {"name": "checkout", "run": "git -C /opt/roam-hub/src checkout -qf --detach origin/main"},
+  {"name": "build", "run": "cd /opt/roam-hub/src && MACHIN=/opt/roam-hub/machin bash build.sh"},
+  {"name": "smoke", "run": "cd /opt/roam-hub/src && rm -f /tmp/deploy-smoke.db && (RHUB_DB=/tmp/deploy-smoke.db timeout 5 ./roam-hub serve 8890 &) && sleep 2 && curl -sf localhost:8890/_health"},
+  {"name": "swap-restart", "run": "install -m755 /opt/roam-hub/src/roam-hub /opt/roam-hub/roam-hub.new && cp /opt/roam-hub/roam-hub /opt/roam-hub/roam-hub.prev && mv -f /opt/roam-hub/roam-hub.new /opt/roam-hub/roam-hub && cmp -s /opt/roam-hub/src/roam-hub /opt/roam-hub/roam-hub && sudo systemctl restart roam-hub"},
+  {"name": "health-or-rollback", "run": "sleep 3; ok=0; for i in 1 2 3 4 5; do curl -sf http://127.0.0.1:8810/_health > /dev/null && ok=1 && break; sleep 2; done; if [ $ok = 1 ]; then echo healthy; else bash /opt/roam-hub/rollback.sh; exit 1; fi"},
+  {"name": "record", "run": "git -C /opt/roam-hub/src rev-parse --short=12 HEAD > /opt/roam-hub/DEPLOYED_SHA && echo deployed $(cat /opt/roam-hub/DEPLOYED_SHA)"}
+]

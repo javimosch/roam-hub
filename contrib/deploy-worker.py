@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""deploy-worker — a DETERMINISTIC roam-hub worker. No LLM anywhere.
+"""deploy-worker — SUPERSEDED reference implementation.
+
+The self-deploy pipeline now runs as a first-class kind:script spec (see
+self-deploy.steps.json next to this file) executed by a stock roam worker.
+This python worker remains as documentation of the engine-agnostic protocol.
+
+Original notes: a DETERMINISTIC roam-hub worker. No LLM anywhere.
 
 Proof that the worker protocol is engine-agnostic: this ~150-line script speaks
 the same wire as a roam agent — polls GET /v1/work, journals steps via
