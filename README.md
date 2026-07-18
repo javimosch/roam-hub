@@ -91,14 +91,6 @@ docs/         VISION.md (north star + what we will NOT build) · M0.md (shipped 
 llms.txt      the front door for agents
 ```
 
-## Case study
-
-**[Guarded remediation: outage → verified recovery in 61 s, one approval](docs/CASE-STUDY-guarded-remediation.md)** —
-perrus monitoring → hub trigger → agent diagnoses on-box → parks on
-`systemctl restart` → one approval → service restored and verified, billed 3¢.
-Honest about what's staged vs real, and includes the failure case: a bad alert
-that cost 15¢ and executed nothing.
-
 ## Status
 
 M0–M2 shipped and live-proven end to end: scheduled + webhook triggers, metered
