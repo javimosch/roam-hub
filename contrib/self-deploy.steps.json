@@ -1,5 +1,9 @@
 [
   {
+    "name": "announce",
+    "run": "echo deploying with steps resolved fresh from the repo at claim time"
+  },
+  {
     "name": "fetch",
     "run": "git -C /opt/roam-hub/src fetch -q origin main && echo new=$(git -C /opt/roam-hub/src rev-parse --short=12 origin/main) deployed=$(cat /opt/roam-hub/DEPLOYED_SHA 2>/dev/null || echo none)"
   },
