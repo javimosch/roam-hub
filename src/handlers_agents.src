@@ -69,6 +69,13 @@ func h_agent_create(req) (res) {
     if onf == "" { onf = "abort" }
     steps, serr := json_get(req.body, ".steps")
     if serr != "" { steps = "" }
+    // steps_url (opt-in, GitOps all the way down): the hub fetches the step
+    // list FRESH at claim time from this URL — a pushed steps change is live on
+    // the very next run, no spec mutation. When set, inline steps are ignored;
+    // a fetch/parse failure fails the run honestly (never a stale fallback).
+    surl, suerr := json_get(req.body, ".steps_url")
+    if suerr != "" { surl = "" }
+    surl = unq(surl)
     if kind != "agent" && kind != "script" {
         res = err_env(80, "invalid_argument", "kind must be 'agent' or 'script'", 0, no_suggestions())
         sqlite_close(db)
@@ -79,10 +86,15 @@ func h_agent_create(req) (res) {
         sqlite_close(db)
         return res
     }
-    if kind == "script" {
+    if surl != "" && !has_prefix(surl, "http") {
+        res = err_env(80, "invalid_argument", "steps_url must be an http(s) URL to a JSON step list", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    if kind == "script" && surl == "" {
         r0, rerr := json_get(steps, "[0].run")
         if rerr != "" || unq(r0) == "" {
-            res = err_env(80, "invalid_argument", "kind 'script' requires steps: [{run, name?, gate?}, ...]", 0, no_suggestions())
+            res = err_env(80, "invalid_argument", "kind 'script' requires steps: [{run, name?, gate?}, ...] or steps_url", 0, no_suggestions())
             sqlite_close(db)
             return res
         }
@@ -99,9 +111,9 @@ func h_agent_create(req) (res) {
     due := now()
     if every == 0 { due = 0 }
     secret := to_hex(rand_bytes(12))
-    sqlite_exec(db, "INSERT INTO agents(id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode, kind, steps, on_failure) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)", []string{id, tid, name, prompt, model, str(every), str(budget), report_url, str(due), str(now()), secret, tmode, kind, steps, onf})
+    sqlite_exec(db, "INSERT INTO agents(id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode, kind, steps, on_failure, steps_url) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)", []string{id, tid, name, prompt, model, str(every), str(budget), report_url, str(due), str(now()), secret, tmode, kind, steps, onf, surl})
     sqlite_close(db)
-    res = ok_env("\"id\":" + json(id) + ",\"next_due\":" + str(due) + ",\"trigger_url\":" + json(public_base() + "/t/" + id + "/" + secret) + ",\"trigger_mode\":" + json(tmode) + ",\"kind\":" + json(kind))
+    res = ok_env("\"id\":" + json(id) + ",\"next_due\":" + str(due) + ",\"trigger_url\":" + json(public_base() + "/t/" + id + "/" + secret) + ",\"trigger_mode\":" + json(tmode) + ",\"kind\":" + json(kind) + ",\"steps_url\":" + json(surl))
 }
 
 func public_base() (u) {
@@ -123,7 +135,7 @@ func h_trigger(req) (res) {
         return res
     }
     db := dbopen()
-    rows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode, kind, steps, on_failure FROM agents WHERE id = ?", []string{parts[0]})
+    rows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode, kind, steps, on_failure, steps_url FROM agents WHERE id = ?", []string{parts[0]})
     ags := parse(rows, []AgentRow{})
     if len(ags) == 0 || ags[0].trigger_secret == "" || ags[0].trigger_secret != parts[1] {
         res = err_env(92, "resource_not_found", "no such trigger", 0, no_suggestions())
@@ -177,7 +189,7 @@ func h_agent_list(req) (res) {
         sqlite_close(db)
         return res
     }
-    rows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode, kind, steps, on_failure FROM agents WHERE tenant_id = ? ORDER BY created DESC", []string{tid})
+    rows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode, kind, steps, on_failure, steps_url FROM agents WHERE tenant_id = ? ORDER BY created DESC", []string{tid})
     ags := parse(rows, []AgentRow{})
     online, last_seen := worker_online(db, tid)
     wflag := "false"

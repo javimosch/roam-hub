@@ -22,7 +22,10 @@ All responses: versioned JSON `{"v":"1", ...}`. Errors are typed:
   executor, no model calls (steps: [{run, name?, gate?}] — gate:true parks the
   step for a human verdict). on_failure "abort" (default) reports the failing
   step; "agent" hands the failure to the LLM loop — intelligence only at
-  exceptions. Green script runs bill the flat fee only.
+  exceptions. Green script runs bill the flat fee only. Opt-in steps_url:
+  an http(s) URL the hub fetches FRESH at claim time (steps live in YOUR
+  repo — a pushed change is live on the next run; fetch failure fails the
+  run as steps_unresolvable, never a stale fallback).
 - `POST /t/<agent_id>/<secret>` — the PUBLIC webhook trigger (secret in path,
   no headers needed). Flood-safe: max 1 queued run per agent, extra hits coalesce.
 - `GET  /v1/agents` — list your specs

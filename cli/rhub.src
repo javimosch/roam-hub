@@ -86,6 +86,7 @@ func main() {
         kind := flagv(a, "--kind", "")
         onf := flagv(a, "--on-failure", "")
         stepsfile := flagv(a, "--steps-file", "")
+        stepsurl := flagv(a, "--steps-url", "")
         steps := "[]"
         if stepsfile != "" { steps = read_file(stepsfile) }
         if name == "" || prompt == "" || every == "" || budget == "" { write(2, "usage: rhub create --name <n> --prompt <p> --every <secs> --budget <microeur> [--model <m>] [--report-url <u>] [--trigger-mode ignore|inject]\n       [--kind agent|script --steps-file steps.json --on-failure abort|agent]\n       --every 0 = webhook-only (fire via the returned trigger_url)\n")  exit(80) }

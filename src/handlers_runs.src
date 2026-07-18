@@ -22,8 +22,7 @@ func h_work(req) (res) {
         return res
     }
     r := rs[0]
-    sqlite_exec(db, "UPDATE runs SET status = 'running', started_at = ?, last_activity = ? WHERE id = ? AND status = 'queued'", []string{str(now()), str(now()), r.id})
-    arows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode, kind, steps, on_failure FROM agents WHERE id = ?", []string{r.agent_id})
+    arows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode, kind, steps, on_failure, steps_url FROM agents WHERE id = ?", []string{r.agent_id})
     ags := parse(arows, []AgentRow{})
     if len(ags) == 0 {
         res = err_env(92, "resource_not_found", "agent vanished under queued run", 0, no_suggestions())
@@ -31,17 +30,43 @@ func h_work(req) (res) {
         return res
     }
     a := ags[0]
-    journal(db, r.id, "claimed", "{}")
-    sqlite_close(db)
-    // webhook-injected runs carry the event: the worker's goal = prompt + payload
-    goal := a.prompt
-    if r.payload != "" { goal = goal + "\n\n[webhook event that triggered this run]\n" + r.payload }
     kind := a.kind
     if kind == "" { kind = "agent" }
     steps := a.steps
     if steps == "" { steps = "[]" }
     onf := a.on_failure
     if onf == "" { onf = "abort" }
+    // steps-from-repo: resolve the step list FRESH at claim time (GitOps — a
+    // pushed change is live on the next run). A fetch/parse failure fails the
+    // run honestly BEFORE it is handed to any worker: never a stale fallback.
+    if kind == "script" && a.steps_url != "" {
+        fst, fbody, ferr := http_request("GET", a.steps_url, []string{}, "")
+        bad := ""
+        if ferr != "" { bad = "steps_url unreachable: " + ferr }
+        if bad == "" && fst != 200 { bad = "steps_url returned " + str(fst) }
+        if bad == "" && len(fbody) > 16384 { bad = "steps_url body exceeds 16KB" }
+        if bad == "" {
+            r0, rerr := json_get(fbody, "[0].run")
+            if rerr != "" || unq(r0) == "" { bad = "steps_url body is not a valid step list" }
+        }
+        if bad != "" {
+            sqlite_exec(db, "UPDATE runs SET status = 'error', exit_reason = 'steps_unresolvable', finished_at = ?, result = ? WHERE id = ?", []string{str(now()), bad + " (" + a.steps_url + ")", r.id})
+            journal(db, r.id, "steps_fetch_failed", "{\"url\":" + json(a.steps_url) + ",\"reason\":" + jesc(bad) + "}")
+            charge_run(db, r.id)
+            report_run(db, r.id)
+            res = response("204 No Content", "application/json", "")
+            sqlite_close(db)
+            return res
+        }
+        steps = fbody
+        journal(db, r.id, "steps_resolved", "{\"url\":" + json(a.steps_url) + ",\"bytes\":" + str(len(fbody)) + "}")
+    }
+    sqlite_exec(db, "UPDATE runs SET status = 'running', started_at = ?, last_activity = ? WHERE id = ? AND status = 'queued'", []string{str(now()), str(now()), r.id})
+    journal(db, r.id, "claimed", "{}")
+    sqlite_close(db)
+    // webhook-injected runs carry the event: the worker's goal = prompt + payload
+    goal := a.prompt
+    if r.payload != "" { goal = goal + "\n\n[webhook event that triggered this run]\n" + r.payload }
     res = ok_env("\"run_id\":" + json(r.id) + ",\"agent_id\":" + json(a.id) + ",\"name\":" + jesc(a.name) + ",\"prompt\":" + jesc(goal) + ",\"model\":" + json(a.model) + ",\"budget_microeur\":" + str(a.budget_microeur) + ",\"kind\":" + json(kind) + ",\"steps\":" + steps + ",\"on_failure\":" + json(onf))
 }
 
