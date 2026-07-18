@@ -121,7 +121,14 @@ def deploy(rid):
     ev(rid, "approved", {"deploy": new_sha})
     # 4. swap + restart + verify (the hub restarts under us — done() retries cover it)
     step(rid, "backup", f"cp {BIN} {BIN}.prev")
-    step(rid, "swap", f"cp {REPO}/roam-hub {BIN}")
+    # mv, not cp: rename() is atomic and legal on a busy running binary ("Text
+    # file busy" bit us on cp). Then PROVE the swap took before claiming it.
+    rc, _ = step(rid, "swap", f"install -m755 {REPO}/roam-hub {BIN}.new && mv -f {BIN}.new {BIN}")
+    if rc != 0:
+        return done(rid, "error", f"swap failed — still on {cur_sha}, service untouched")
+    rc, _ = step(rid, "verify-binary", f"cmp -s {REPO}/roam-hub {BIN}")
+    if rc != 0:
+        return done(rid, "error", f"swap verification failed — aborting before restart, still on {cur_sha}")
     step(rid, "restart", f"sudo systemctl restart {SERVICE}")
     if health_ok(HEALTH):
         open(SHA_FILE, "w").write(new_sha)
