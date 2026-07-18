@@ -83,8 +83,13 @@ func main() {
         model := flagv(a, "--model", "")
         rurl := flagv(a, "--report-url", "")
         tmode := flagv(a, "--trigger-mode", "")
-        if name == "" || prompt == "" || every == "" || budget == "" { write(2, "usage: rhub create --name <n> --prompt <p> --every <secs> --budget <microeur> [--model <m>] [--report-url <u>] [--trigger-mode ignore|inject]\n       --every 0 = webhook-only (fire via the returned trigger_url)\n")  exit(80) }
-        body := "{\"name\":" + jq(name) + ",\"prompt\":" + jq(prompt) + ",\"every_secs\":" + every + ",\"budget_microeur\":" + budget + ",\"model\":" + jq(model) + ",\"report_url\":" + jq(rurl) + ",\"trigger_mode\":" + jq(tmode) + "}"
+        kind := flagv(a, "--kind", "")
+        onf := flagv(a, "--on-failure", "")
+        stepsfile := flagv(a, "--steps-file", "")
+        steps := "[]"
+        if stepsfile != "" { steps = read_file(stepsfile) }
+        if name == "" || prompt == "" || every == "" || budget == "" { write(2, "usage: rhub create --name <n> --prompt <p> --every <secs> --budget <microeur> [--model <m>] [--report-url <u>] [--trigger-mode ignore|inject]\n       [--kind agent|script --steps-file steps.json --on-failure abort|agent]\n       --every 0 = webhook-only (fire via the returned trigger_url)\n")  exit(80) }
+        body := "{\"name\":" + jq(name) + ",\"prompt\":" + jq(prompt) + ",\"every_secs\":" + every + ",\"budget_microeur\":" + budget + ",\"model\":" + jq(model) + ",\"report_url\":" + jq(rurl) + ",\"trigger_mode\":" + jq(tmode) + ",\"kind\":" + jq(kind) + ",\"on_failure\":" + jq(onf) + ",\"steps\":" + steps + "}"
         exit(call("POST", "/v1/agents", body, need_token()))
     }
     if cmd == "list" { exit(call("GET", "/v1/agents", "", need_token())) }

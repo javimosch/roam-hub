@@ -13,9 +13,12 @@ func dbopen() (db) {
 
 func ensure_schema(db) {
     sqlite_exec(db, "CREATE TABLE IF NOT EXISTS tenants(id TEXT PRIMARY KEY, email TEXT UNIQUE, token_hash TEXT, worker_token_hash TEXT, peage_wallet TEXT DEFAULT '', created INTEGER, worker_last_seen INTEGER DEFAULT 0)", []string{})
-    sqlite_exec(db, "CREATE TABLE IF NOT EXISTS agents(id TEXT PRIMARY KEY, tenant_id TEXT, name TEXT, prompt TEXT, model TEXT, every_secs INTEGER, budget_microeur INTEGER, report_url TEXT, status TEXT, next_due INTEGER, created INTEGER, trigger_secret TEXT DEFAULT '', trigger_mode TEXT DEFAULT 'ignore')", []string{})
+    sqlite_exec(db, "CREATE TABLE IF NOT EXISTS agents(id TEXT PRIMARY KEY, tenant_id TEXT, name TEXT, prompt TEXT, model TEXT, every_secs INTEGER, budget_microeur INTEGER, report_url TEXT, status TEXT, next_due INTEGER, created INTEGER, trigger_secret TEXT DEFAULT '', trigger_mode TEXT DEFAULT 'ignore', kind TEXT DEFAULT 'agent', steps TEXT DEFAULT '', on_failure TEXT DEFAULT 'abort')", []string{})
     sqlite_exec(db, "ALTER TABLE agents ADD COLUMN trigger_secret TEXT DEFAULT ''", []string{})
     sqlite_exec(db, "ALTER TABLE agents ADD COLUMN trigger_mode TEXT DEFAULT 'ignore'", []string{})
+    sqlite_exec(db, "ALTER TABLE agents ADD COLUMN kind TEXT DEFAULT 'agent'", []string{})
+    sqlite_exec(db, "ALTER TABLE agents ADD COLUMN steps TEXT DEFAULT ''", []string{})
+    sqlite_exec(db, "ALTER TABLE agents ADD COLUMN on_failure TEXT DEFAULT 'abort'", []string{})
     sqlite_exec(db, "ALTER TABLE runs ADD COLUMN payload TEXT DEFAULT ''", []string{})
     sqlite_exec(db, "ALTER TABLE runs ADD COLUMN last_activity INTEGER DEFAULT 0", []string{})
     sqlite_exec(db, "ALTER TABLE runs ADD COLUMN reclaims INTEGER DEFAULT 0", []string{})

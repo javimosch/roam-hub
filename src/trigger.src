@@ -49,7 +49,7 @@ func tick_once() (queued) {
     queued = 0
     db := dbopen()
     t := now()
-    rows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode FROM agents WHERE status = 'active' AND every_secs > 0 AND next_due <= ?", []string{str(t)})
+    rows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode, kind, steps, on_failure FROM agents WHERE status = 'active' AND every_secs > 0 AND next_due <= ?", []string{str(t)})
     ags := parse(rows, []AgentRow{})
     i := 0
     for i < len(ags) {

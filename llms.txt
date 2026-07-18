@@ -18,6 +18,11 @@ All responses: versioned JSON `{"v":"1", ...}`. Errors are typed:
   trigger_mode?} → {id, trigger_url, trigger_mode}. every_secs=0 = webhook-only.
   trigger_mode: "ignore" (default) fires the spec as-is; "inject" appends the
   webhook's JSON body to the prompt (event-driven agents).
+  kind "agent" (default) = LLM tool-loop; kind "script" = DETERMINISTIC step
+  executor, no model calls (steps: [{run, name?, gate?}] — gate:true parks the
+  step for a human verdict). on_failure "abort" (default) reports the failing
+  step; "agent" hands the failure to the LLM loop — intelligence only at
+  exceptions. Green script runs bill the flat fee only.
 - `POST /t/<agent_id>/<secret>` — the PUBLIC webhook trigger (secret in path,
   no headers needed). Flood-safe: max 1 queued run per agent, extra hits coalesce.
 - `GET  /v1/agents` — list your specs

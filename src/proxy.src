@@ -211,7 +211,7 @@ func jenv_int(name, dflt) (n) {
 func budget_exhausted(db, r) (over, budget) {
     over = 0
     budget = 0
-    rows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode FROM agents WHERE id = ?", []string{r.agent_id})
+    rows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode, kind, steps, on_failure FROM agents WHERE id = ?", []string{r.agent_id})
     ags := parse(rows, []AgentRow{})
     if len(ags) == 0 { return over, budget }
     budget = ags[0].budget_microeur
