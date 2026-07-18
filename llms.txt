@@ -23,7 +23,7 @@ All responses: versioned JSON `{"v":"1", ...}`. Errors are typed:
 - `GET  /v1/agents` — list your specs
 - `GET  /v1/agent?id=` — one spec + last run summary
 - `POST /v1/agent/pause` {id} · `POST /v1/agent/resume` {id} · `POST /v1/agent/delete` {id} (runs/journals remain as billing history)
-- `GET  /v1/runs?agent=` — run history (cost, tokens, exit_reason)
+- `GET  /v1/runs?agent=` — run history (cost, tokens, exit_reason, result — the agent's finish summary, e.g. a published URL)
 - `GET  /v1/run?id=` — run detail + full journal (append-only event log)
 - Worker protocol (`roam worker --hub <url> --token <rhw_...>`): `GET /v1/work`,
   `POST /v1/llm` (aliases: `/v1/messages` anthropic-shaped, `/chat/completions`

@@ -19,8 +19,9 @@ func ensure_schema(db) {
     sqlite_exec(db, "ALTER TABLE runs ADD COLUMN payload TEXT DEFAULT ''", []string{})
     sqlite_exec(db, "ALTER TABLE runs ADD COLUMN last_activity INTEGER DEFAULT 0", []string{})
     sqlite_exec(db, "ALTER TABLE runs ADD COLUMN reclaims INTEGER DEFAULT 0", []string{})
+    sqlite_exec(db, "ALTER TABLE runs ADD COLUMN result TEXT DEFAULT ''", []string{})
     sqlite_exec(db, "ALTER TABLE tenants ADD COLUMN worker_last_seen INTEGER DEFAULT 0", []string{})
-    sqlite_exec(db, "CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, agent_id TEXT, tenant_id TEXT, status TEXT, scheduled_at INTEGER, started_at INTEGER, finished_at INTEGER, cost_microeur INTEGER, tokens_in INTEGER, tokens_out INTEGER, exit_reason TEXT, decision TEXT DEFAULT '', payload TEXT DEFAULT '', last_activity INTEGER DEFAULT 0, reclaims INTEGER DEFAULT 0)", []string{})
+    sqlite_exec(db, "CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, agent_id TEXT, tenant_id TEXT, status TEXT, scheduled_at INTEGER, started_at INTEGER, finished_at INTEGER, cost_microeur INTEGER, tokens_in INTEGER, tokens_out INTEGER, exit_reason TEXT, decision TEXT DEFAULT '', payload TEXT DEFAULT '', last_activity INTEGER DEFAULT 0, reclaims INTEGER DEFAULT 0, result TEXT DEFAULT '')", []string{})
     // M1 upgrade for pre-decision databases; harmless no-op error once applied
     sqlite_exec(db, "ALTER TABLE runs ADD COLUMN decision TEXT DEFAULT ''", []string{})
     sqlite_exec(db, "CREATE TABLE IF NOT EXISTS events(run_id TEXT, ts INTEGER, kind TEXT, data TEXT)", []string{})

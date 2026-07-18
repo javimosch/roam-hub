@@ -4,7 +4,7 @@
 // reports typed failure to the journal; the owning agent decides what to do).
 
 func report_run(db, run_id) {
-    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload, last_activity, reclaims FROM runs WHERE id = ?", []string{run_id})
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload, last_activity, reclaims, result FROM runs WHERE id = ?", []string{run_id})
     rs := parse(rows, []RunRow{})
     if len(rs) == 0 { return }
     r := rs[0]
@@ -16,7 +16,7 @@ func report_run(db, run_id) {
         journal(db, run_id, "report_skipped", "{\"reason\":\"no report_url on spec\"}")
         return
     }
-    body := "{\"v\":\"1\",\"run_id\":" + json(r.id) + ",\"agent\":" + json(a.name) + ",\"status\":" + json(r.status) + ",\"exit_reason\":" + json(r.exit_reason) + ",\"cost_microeur\":" + str(r.cost_microeur) + ",\"tokens_in\":" + str(r.tokens_in) + ",\"tokens_out\":" + str(r.tokens_out) + "}"
+    body := "{\"v\":\"1\",\"run_id\":" + json(r.id) + ",\"agent\":" + jesc(a.name) + ",\"status\":" + json(r.status) + ",\"exit_reason\":" + json(r.exit_reason) + ",\"result\":" + jesc(r.result) + ",\"cost_microeur\":" + str(r.cost_microeur) + ",\"tokens_in\":" + str(r.tokens_in) + ",\"tokens_out\":" + str(r.tokens_out) + "}"
     status, resp, herr := http_request("POST", a.report_url, []string{"content-type: application/json"}, body)
     if herr != "" {
         journal(db, run_id, "report_failed", "{\"type\":\"webhook_unreachable\",\"recoverable\":true}")

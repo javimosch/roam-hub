@@ -14,7 +14,7 @@ func h_work(req) (res) {
         sqlite_close(db)
         return res
     }
-    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload, last_activity, reclaims FROM runs WHERE tenant_id = ? AND status = 'queued' ORDER BY scheduled_at ASC LIMIT 1", []string{tid})
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload, last_activity, reclaims, result FROM runs WHERE tenant_id = ? AND status = 'queued' ORDER BY scheduled_at ASC LIMIT 1", []string{tid})
     rs := parse(rows, []RunRow{})
     if len(rs) == 0 {
         res = response("204 No Content", "application/json", "")
@@ -75,15 +75,17 @@ func h_run_done(req) (res) {
     }
     run_id, _ := json_get(req.body, ".run_id")
     reason, _ := json_get(req.body, ".exit_reason")
+    result, _ := json_get(req.body, ".result")
     run_id = unq(run_id)
     reason = unq(reason)
+    result = unq(result)
     if run_owned(db, run_id, tid) == 0 {
         res = err_env(92, "resource_not_found", "no such run", 0, no_suggestions())
         sqlite_close(db)
         return res
     }
-    sqlite_exec(db, "UPDATE runs SET status = 'done', finished_at = ?, exit_reason = ? WHERE id = ?", []string{str(now()), reason, run_id})
-    journal(db, run_id, "done", "{\"exit_reason\":" + json(reason) + "}")
+    sqlite_exec(db, "UPDATE runs SET status = 'done', finished_at = ?, exit_reason = ?, result = ? WHERE id = ?", []string{str(now()), reason, result, run_id})
+    journal(db, run_id, "done", "{\"exit_reason\":" + json(reason) + ",\"result\":" + jesc(result) + "}")
     charge_run(db, run_id)
     report_run(db, run_id)
     sqlite_close(db)
@@ -123,14 +125,14 @@ func h_runs(req) (res) {
         return res
     }
     agent_id := query(req, "agent")
-    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload, last_activity, reclaims FROM runs WHERE agent_id = ? AND tenant_id = ? ORDER BY scheduled_at DESC LIMIT 50", []string{agent_id, tid})
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload, last_activity, reclaims, result FROM runs WHERE agent_id = ? AND tenant_id = ? ORDER BY scheduled_at DESC LIMIT 50", []string{agent_id, tid})
     rs := parse(rows, []RunRow{})
     out := "\"runs\":["
     i := 0
     for i < len(rs) {
         if i > 0 { out = out + "," }
         r := rs[i]
-        out = out + "{\"id\":" + json(r.id) + ",\"status\":" + json(r.status) + ",\"cost_microeur\":" + str(r.cost_microeur) + ",\"tokens_in\":" + str(r.tokens_in) + ",\"tokens_out\":" + str(r.tokens_out) + ",\"exit_reason\":" + json(r.exit_reason) + "}"
+        out = out + "{\"id\":" + json(r.id) + ",\"status\":" + json(r.status) + ",\"cost_microeur\":" + str(r.cost_microeur) + ",\"tokens_in\":" + str(r.tokens_in) + ",\"tokens_out\":" + str(r.tokens_out) + ",\"exit_reason\":" + json(r.exit_reason) + ",\"result\":" + jesc(r.result) + "}"
         i = i + 1
     }
     out = out + "]"
@@ -213,7 +215,7 @@ func h_run_decision(req) (res) {
         sqlite_close(db)
         return res
     }
-    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload, last_activity, reclaims FROM runs WHERE id = ?", []string{id})
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload, last_activity, reclaims, result FROM runs WHERE id = ?", []string{id})
     rs := parse(rows, []RunRow{})
     d := rs[0].decision
     if rs[0].status == "killed" { d = "stop" }

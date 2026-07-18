@@ -25,7 +25,7 @@ func max_reclaims() (n) {
 // never silence).
 func reclaim_stale(db, t) {
     cutoff := t - run_stale_secs()
-    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload, last_activity, reclaims FROM runs WHERE (status = 'running' OR status = 'awaiting') AND last_activity > 0 AND last_activity < ?", []string{str(cutoff)})
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload, last_activity, reclaims, result FROM runs WHERE (status = 'running' OR status = 'awaiting') AND last_activity > 0 AND last_activity < ?", []string{str(cutoff)})
     rs := parse(rows, []RunRow{})
     i := 0
     for i < len(rs) {
