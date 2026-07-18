@@ -9,6 +9,7 @@ func handle(req) (res) {
     p := pathof(req)
     if p == "/_health" { return ok_env("\"ok\":true,\"service\":\"roam-hub\"") }
     if req.method == "GET" && p == "/llms.txt" { return h_llmstxt(req) }
+    if req.method == "GET" && p == "/" { return h_llmstxt(req) }
     if req.method == "GET" && p == "/v1/guide" { return h_guide(req) }
     if req.method == "POST" && p == "/v1/signup" { return h_signup(req) }
     if req.method == "POST" && p == "/v1/wallet" { return h_wallet_set(req) }
