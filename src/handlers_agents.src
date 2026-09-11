@@ -281,6 +281,80 @@ func h_wallet_set(req) (res) {
     res = ok_env("\"wallet\":\"set\"")
 }
 
+// GET /v1/whoami — cli-trial-spec: any bearer token auto-provisions a tenant.
+// The token IS the credential; no email, no signup. If the token doesn't match
+// a tenant, one is created on the spot. Returns status so the agent can proceed.
+// The human can attach an email later via POST /app/claim.
+func h_whoami(req) (res) {
+    db := dbopen()
+    h := header(req, "Authorization")
+    if !has_prefix(h, "Bearer ") {
+        res = err_env(81, "unauthorized", "Authorization: Bearer <token> required", 0, "[\"generate any token and call whoami to auto-provision\"]")
+        sqlite_close(db)
+        return res
+    }
+    tok := substr(h, 7, len(h))
+    if len(tok) < 8 {
+        res = err_env(80, "invalid_argument", "token too short (min 8 chars)", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    // look up existing tenant
+    rows := sqlite_query(db, "SELECT id, email, token_hash, worker_token_hash, peage_wallet, created, worker_last_seen FROM tenants WHERE token_hash = ?", []string{tok_hash(tok)})
+    ts := parse(rows, []TenantRow{})
+    if len(ts) > 0 {
+        t := ts[0]
+        wallet_set := "false"
+        if t.peage_wallet != "" { wallet_set = "true" }
+        email := t.email
+        if email == "" { email = "" }
+        sqlite_close(db)
+        res = ok_env("\"tenant_id\":" + json(t.id) + ",\"email\":" + json(email) + ",\"wallet_attached\":" + wallet_set + ",\"claimed\":" + bool_str(email != "") + ",\"plan\":\"pay_per_run\"")
+        return res
+    }
+    // auto-provision: create a new tenant with this token, no email
+    id := newid()
+    wtok := "rhw_" + newid()
+    sqlite_exec(db, "INSERT INTO tenants(id, email, token_hash, worker_token_hash, peage_wallet, created) VALUES(?, '', ?, ?, '', ?)", []string{id, tok_hash(tok), tok_hash(wtok), str(now())})
+    sqlite_close(db)
+    res = ok_env("\"tenant_id\":" + json(id) + ",\"email\":\"\",\"wallet_attached\":false,\"claimed\":false,\"plan\":\"pay_per_run\",\"worker_token\":" + json(wtok) + ",\"auto_provisioned\":true")
+}
+
+// POST /app/claim {email} — attach an email to an existing tenant (recovery + billing).
+// The token IS the credential; the email is recovery + billing.
+func h_claim(req) (res) {
+    db := dbopen()
+    tid, ok := bearer_tenant(db, req)
+    if ok == 0 {
+        res = err_env(81, "unauthorized", "bearer token invalid", 0, "[\"call GET /v1/whoami with your token to auto-provision\"]")
+        sqlite_close(db)
+        return res
+    }
+    email, _ := json_get(req.body, ".email")
+    email = unq(email)
+    if email == "" {
+        res = err_env(80, "invalid_argument", "email is required", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    // check email not already claimed by another tenant
+    rows := sqlite_query(db, "SELECT COUNT(*) AS n FROM tenants WHERE email = ? AND id != ?", []string{email, tid})
+    cnt := parse(rows, []CntRow{})
+    if len(cnt) > 0 && cnt[0].n > 0 {
+        res = err_env(90, "already_exists", "email already claimed by another tenant", 0, no_suggestions())
+        sqlite_close(db)
+        return res
+    }
+    sqlite_exec(db, "UPDATE tenants SET email = ? WHERE id = ?", []string{email, tid})
+    sqlite_close(db)
+    res = ok_env("\"claimed\":true,\"email\":" + json(email))
+}
+
+func bool_str(b) (s) {
+    s = "false"
+    if b == true { s = "true" }
+}
+
 func default_model() (m) {
     m = env("RHUB_DEFAULT_MODEL")
     if m == "" { m = "claude-haiku-4-5" }

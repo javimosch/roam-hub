@@ -20,6 +20,8 @@ func handle(req) (res) {
     if req.method == "GET" && p == "/" { return h_llmstxt(req) }
     if req.method == "GET" && p == "/v1/guide" { return h_guide(req) }
     if req.method == "POST" && p == "/v1/signup" { return h_signup(req) }
+    if req.method == "GET" && p == "/v1/whoami" { return h_whoami(req) }
+    if req.method == "POST" && p == "/app/claim" { return h_claim(req) }
     if req.method == "POST" && p == "/v1/wallet" { return h_wallet_set(req) }
     if req.method == "POST" && has_prefix(p, "/t/") { return h_trigger(req) }
     if req.method == "POST" && p == "/v1/agents" { return h_agent_create(req) }
@@ -50,11 +52,11 @@ func h_llmstxt(req) (res) {
 // h_guide — in-band capability doc: version-exact, machine-readable. The API
 // analog of `machin guide` and of --help-json in the bible.
 func h_guide(req) (res) {
-    res = ok_env("\"service\":\"roam-hub\",\"endpoints\":[\"POST /v1/signup\",\"POST /v1/agents\",\"GET /v1/agents\",\"POST /v1/agent/pause\",\"POST /v1/agent/resume\",\"GET /v1/runs?agent=\",\"GET /v1/run?id=\",\"POST /v1/run/kill\",\"GET /v1/work\",\"POST /v1/llm\",\"POST /v1/run/events\",\"POST /v1/run/done\"],\"billing\":\"peage per run: token cost x1.3 + 10000 microeur\",\"docs\":\"https://hub.roam.intrane.fr/llms.txt\"")
+    res = ok_env("\"service\":\"roam-hub\",\"endpoints\":[\"POST /v1/signup\",\"GET /v1/whoami\",\"POST /app/claim\",\"POST /v1/wallet\",\"POST /v1/agents\",\"GET /v1/agents\",\"POST /v1/agent/pause\",\"POST /v1/agent/resume\",\"POST /v1/agent/delete\",\"GET /v1/runs?agent=\",\"GET /v1/run?id=\",\"POST /v1/run/kill\",\"POST /v1/run/approve\",\"POST /v1/run/deny\",\"GET /v1/work\",\"POST /v1/llm\",\"POST /v1/run/events\",\"POST /v1/run/done\",\"POST /_shutdown\"],\"billing\":\"peage per run: token cost x1.3 + 10000 microeur\",\"trial\":\"GET /v1/whoami with any Bearer token auto-provisions a tenant — no email needed; POST /app/claim to attach email later\",\"docs\":\"https://hub.roam.intrane.fr/llms.txt\"")
 }
 
 func llms_txt() (t) {
-    t = "# roam-hub\nPOST a spec, walk away, get a webhook.\nSee GET /v1/guide for the machine-readable capability doc.\n"
+    t = "# roam-hub\nPOST a spec, walk away, get a webhook.\nGET /v1/whoami with any Bearer token auto-provisions a tenant (cli-trial-spec).\nPOST /app/claim to attach an email later.\nSee GET /v1/guide for the machine-readable capability doc.\n"
 }
 
 func app_main() {
