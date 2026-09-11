@@ -6,6 +6,11 @@
 // GET /v1/work — hand the oldest queued run to a worker of the same tenant.
 // 204 when idle. Claiming flips status queued → running (single UPDATE guards
 // against two workers claiming the same run).
+//
+// Worker routing (cli-trial-spec extension): workers may pass ?labels=k=v,k=v
+// and ?name=prod-01 as query params. The hub only hands a run whose agent
+// selector is satisfied by the worker's labels. Empty selector = any worker.
+// Worker with no labels = only gets runs with empty selector (backward compatible).
 func h_work(req) (res) {
     db := dbopen()
     tid, ok := worker_tenant(db, req)
@@ -14,22 +19,37 @@ func h_work(req) (res) {
         sqlite_close(db)
         return res
     }
-    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload, last_activity, reclaims, result FROM runs WHERE tenant_id = ? AND status = 'queued' ORDER BY scheduled_at ASC LIMIT 1", []string{tid})
+    wlabels := query_param(req.path, "labels")
+    wname := query_param(req.path, "name")
+    // fetch all queued runs (ordered by scheduled_at), then find the first
+    // whose agent selector matches the worker's labels
+    rows := sqlite_query(db, "SELECT id, agent_id, tenant_id, status, scheduled_at, started_at, finished_at, cost_microeur, tokens_in, tokens_out, exit_reason, decision, payload, last_activity, reclaims, result FROM runs WHERE tenant_id = ? AND status = 'queued' ORDER BY scheduled_at ASC", []string{tid})
     rs := parse(rows, []RunRow{})
-    if len(rs) == 0 {
+    matched := 0
+    i := 0
+    for i < len(rs) && matched == 0 {
+        r := rs[i]
+        arows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode, kind, steps, on_failure, steps_url, selector FROM agents WHERE id = ?", []string{r.agent_id})
+        ags := parse(arows, []AgentRow{})
+        if len(ags) > 0 {
+            if labels_match(ags[0].selector, wlabels) == 1 {
+                matched = 1
+                res = claim_run(db, tid, r, ags[0], wname)
+                sqlite_close(db)
+                return res
+            }
+        }
+        i = i + 1
+    }
+    if matched == 0 {
         res = response("204 No Content", "application/json", "")
         sqlite_close(db)
         return res
     }
-    r := rs[0]
-    arows := sqlite_query(db, "SELECT id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode, kind, steps, on_failure, steps_url FROM agents WHERE id = ?", []string{r.agent_id})
-    ags := parse(arows, []AgentRow{})
-    if len(ags) == 0 {
-        res = err_env(92, "resource_not_found", "agent vanished under queued run", 0, no_suggestions())
-        sqlite_close(db)
-        return res
-    }
-    a := ags[0]
+}
+
+// claim_run — claim a run and return the work item response.
+func claim_run(db, tid, r, a, wname) (res) {
     kind := a.kind
     if kind == "" { kind = "agent" }
     steps := a.steps
@@ -55,19 +75,55 @@ func h_work(req) (res) {
             charge_run(db, r.id)
             report_run(db, r.id)
             res = response("204 No Content", "application/json", "")
-            sqlite_close(db)
             return res
         }
         steps = fbody
         journal(db, r.id, "steps_resolved", "{\"url\":" + json(a.steps_url) + ",\"bytes\":" + str(len(fbody)) + "}")
     }
     sqlite_exec(db, "UPDATE runs SET status = 'running', started_at = ?, last_activity = ? WHERE id = ? AND status = 'queued'", []string{str(now()), str(now()), r.id})
-    journal(db, r.id, "claimed", "{}")
-    sqlite_close(db)
+    claim_data := "{}"
+    if wname != "" { claim_data = "{\"worker\":" + json(wname) + "}" }
+    journal(db, r.id, "claimed", claim_data)
     // webhook-injected runs carry the event: the worker's goal = prompt + payload
     goal := a.prompt
     if r.payload != "" { goal = goal + "\n\n[webhook event that triggered this run]\n" + r.payload }
     res = ok_env("\"run_id\":" + json(r.id) + ",\"agent_id\":" + json(a.id) + ",\"name\":" + jesc(a.name) + ",\"prompt\":" + jesc(goal) + ",\"model\":" + json(a.model) + ",\"budget_microeur\":" + str(a.budget_microeur) + ",\"kind\":" + json(kind) + ",\"steps\":" + steps + ",\"on_failure\":" + json(onf))
+}
+
+// labels_match — check if all key=value pairs in selector are present in labels.
+// Empty selector matches any worker. Worker with no labels only matches empty selector.
+func labels_match(selector, labels) (ok) {
+    ok = 1
+    if selector == "" { return ok }
+    if labels == "" { ok = 0  return ok }
+    pairs := split(selector, ",")
+    i := 0
+    for i < len(pairs) {
+        kv := trim(pairs[i])
+        if kv != "" {
+            if contains(labels, kv) == false { ok = 0  return ok }
+        }
+        i = i + 1
+    }
+}
+
+// query_param — extract a query parameter value from a URL path.
+func query_param(path, key) (v) {
+    v = ""
+    qi := index(path, "?")
+    if qi < 0 { return v }
+    qs := substr(path, qi + 1, len(path))
+    params := split(qs, "&")
+    i := 0
+    for i < len(params) {
+        p := params[i]
+        eq := index(p, "=")
+        if eq > 0 {
+            k := substr(p, 0, eq)
+            if k == key { v = substr(p, eq + 1, len(p))  return v }
+        }
+        i = i + 1
+    }
 }
 
 // POST /v1/run/events {run_id, kind, data} — worker streams journal entries.

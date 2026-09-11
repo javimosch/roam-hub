@@ -76,6 +76,10 @@ func h_agent_create(req) (res) {
     surl, suerr := json_get(req.body, ".steps_url")
     if suerr != "" { surl = "" }
     surl = unq(surl)
+    // selector: comma-separated key=value labels that workers must match
+    // (e.g., "gpu=true,docker=true"). Empty = any worker (backward compatible).
+    selector, _ := json_get(req.body, ".selector")
+    selector = unq(selector)
     if kind != "agent" && kind != "script" {
         res = err_env(80, "invalid_argument", "kind must be 'agent' or 'script'", 0, no_suggestions())
         sqlite_close(db)
@@ -111,9 +115,9 @@ func h_agent_create(req) (res) {
     due := now()
     if every == 0 { due = 0 }
     secret := to_hex(rand_bytes(12))
-    sqlite_exec(db, "INSERT INTO agents(id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode, kind, steps, on_failure, steps_url) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)", []string{id, tid, name, prompt, model, str(every), str(budget), report_url, str(due), str(now()), secret, tmode, kind, steps, onf, surl})
+    sqlite_exec(db, "INSERT INTO agents(id, tenant_id, name, prompt, model, every_secs, budget_microeur, report_url, status, next_due, created, trigger_secret, trigger_mode, kind, steps, on_failure, steps_url, selector) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)", []string{id, tid, name, prompt, model, str(every), str(budget), report_url, str(due), str(now()), secret, tmode, kind, steps, onf, surl, selector})
     sqlite_close(db)
-    res = ok_env("\"id\":" + json(id) + ",\"next_due\":" + str(due) + ",\"trigger_url\":" + json(public_base() + "/t/" + id + "/" + secret) + ",\"trigger_mode\":" + json(tmode) + ",\"kind\":" + json(kind) + ",\"steps_url\":" + json(surl))
+    res = ok_env("\"id\":" + json(id) + ",\"next_due\":" + str(due) + ",\"trigger_url\":" + json(public_base() + "/t/" + id + "/" + secret) + ",\"trigger_mode\":" + json(tmode) + ",\"kind\":" + json(kind) + ",\"steps_url\":" + json(surl) + ",\"selector\":" + json(selector))
 }
 
 func public_base() (u) {

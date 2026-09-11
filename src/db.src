@@ -20,6 +20,7 @@ func ensure_schema(db) {
     sqlite_exec(db, "ALTER TABLE agents ADD COLUMN steps TEXT DEFAULT ''", []string{})
     sqlite_exec(db, "ALTER TABLE agents ADD COLUMN on_failure TEXT DEFAULT 'abort'", []string{})
     sqlite_exec(db, "ALTER TABLE agents ADD COLUMN steps_url TEXT DEFAULT ''", []string{})
+    sqlite_exec(db, "ALTER TABLE agents ADD COLUMN selector TEXT DEFAULT ''", []string{})
     sqlite_exec(db, "ALTER TABLE runs ADD COLUMN payload TEXT DEFAULT ''", []string{})
     sqlite_exec(db, "ALTER TABLE runs ADD COLUMN last_activity INTEGER DEFAULT 0", []string{})
     sqlite_exec(db, "ALTER TABLE runs ADD COLUMN reclaims INTEGER DEFAULT 0", []string{})
