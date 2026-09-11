@@ -8,6 +8,14 @@
 func handle(req) (res) {
     p := pathof(req)
     if p == "/_health" { return ok_env("\"ok\":true,\"service\":\"roam-hub\"") }
+    if p == "/_shutdown" && req.method == "POST" {
+        tok := header(req, "X-Shutdown-Token")
+        expected := env("RHUB_SHUTDOWN_TOKEN")
+        if expected == "" { return err_env(93, "shutdown_not_configured", "RHUB_SHUTDOWN_TOKEN not set", 0, no_suggestions()) }
+        if tok != expected { return err_env(93, "forbidden", "invalid shutdown token", 0, no_suggestions()) }
+        go shutdown_delayed()
+        return ok_env("\"ok\":true,\"shutting_down\":true")
+    }
     if req.method == "GET" && p == "/llms.txt" { return h_llmstxt(req) }
     if req.method == "GET" && p == "/" { return h_llmstxt(req) }
     if req.method == "GET" && p == "/v1/guide" { return h_guide(req) }
@@ -73,4 +81,10 @@ func app_main() {
     }
     write(2, "usage: roam-hub serve [port] | migrate\n")
     exit(80)
+}
+
+// shutdown_delayed exits after a brief delay so the response can flush.
+func shutdown_delayed() {
+    sleep(200)
+    exit(0)
 }
